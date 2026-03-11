@@ -46,8 +46,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma        ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/package.json  ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/entrypoint.sh ./entrypoint.sh
 
+# Copy MCP server source (runs via tsx at runtime)
+COPY --from=builder --chown=nextjs:nodejs /app/src/mcp-server ./src/mcp-server
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib        ./src/lib
+COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json  ./tsconfig.json
+
 USER nextjs
 
-EXPOSE 3000
+EXPOSE 3000 3001
 
 ENTRYPOINT ["sh", "./entrypoint.sh"]

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { listCategories } from "@/lib/services";
 
 export async function GET() {
-  const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
+  const categories = await listCategories();
   return NextResponse.json(categories);
 }
 
