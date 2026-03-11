@@ -39,14 +39,15 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
 # Copy built app and all node_modules (includes generated Prisma client)
-COPY --from=builder --chown=nextjs:nodejs /app/public       ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next        ./.next
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nextjs:nodejs /app/prisma       ./prisma
-COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/public        ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next         ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules  ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/prisma        ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/package.json  ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/entrypoint.sh ./entrypoint.sh
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+ENTRYPOINT ["sh", "./entrypoint.sh"]
