@@ -11,9 +11,12 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:db:up": "docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d db",
-    "docker:db:down": "docker compose -f docker-compose.yml -f docker-compose.local-db.yml stop db"
+    "docker:db:down": "docker compose -f docker-compose.yml -f docker-compose.local-db.yml stop db",
+    "mcp:dev": "tsx src/mcp-server/index.ts",
+    "mcp:start": "node --import tsx src/mcp-server/index.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@prisma/client": "^6",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.9.0",
@@ -24,7 +27,8 @@
     "prisma": "^6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "zod": "^4.3.6"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
