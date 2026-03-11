@@ -51,13 +51,15 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger Dokploy deployment
-        if: success()
-        uses: dokploy/dokploy-action@v1
-        with:
-          # Add these secrets in: Settings → Secrets → Actions
-          # DOKPLOY_URL  : your Dokploy instance URL, e.g. https://dokploy.example.com
-          # DOKPLOY_TOKEN: API key generated in Dokploy → Settings → API
-          # DOKPLOY_APP_ID: Application ID found in Dokploy → Application → Settings
-          url: ${{ secrets.DOKPLOY_URL }}
-          token: ${{ secrets.DOKPLOY_TOKEN }}
-          appId: ${{ secrets.DOKPLOY_APP_ID }}
+        # Secrets required in Settings → Secrets → Actions:
+        #   DOKPLOY_URL   : your Dokploy instance URL, e.g. https://dokploy.example.com
+        #   DOKPLOY_TOKEN : API key from Dokploy → Settings → API
+        #   DOKPLOY_APP_ID: Application ID from Dokploy → Application → General
+        run: |
+          curl -X POST \
+            "${{ secrets.DOKPLOY_URL }}/api/application.deploy" \
+            -H "accept: application/json" \
+            -H "x-api-key: ${{ secrets.DOKPLOY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"applicationId\": \"${{ secrets.DOKPLOY_APP_ID }}\"}" \
+            --fail-with-body
