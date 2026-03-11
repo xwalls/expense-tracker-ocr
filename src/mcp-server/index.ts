@@ -6,14 +6,20 @@ import { registerTools } from "./tools";
 
 const PORT = Number(process.env.MCP_PORT) || 3001;
 
-// Create MCP server
-const mcpServer = new McpServer({
-  name: "expense-tracker-mcp",
-  version: "1.0.0",
-});
-
-// Register all tools
-registerTools(mcpServer);
+/**
+ * Creates a fresh McpServer instance with all tools registered.
+ * In stateless mode, each request needs its own server+transport pair
+ * because McpServer.connect() binds to a single transport and rejects
+ * subsequent connect() calls.
+ */
+function createMcpServerInstance(): McpServer {
+  const server = new McpServer({
+    name: "expense-tracker-mcp",
+    version: "1.0.0",
+  });
+  registerTools(server);
+  return server;
+}
 
 // Create HTTP server with auth middleware
 const httpServer = createServer(async (req, res) => {
@@ -46,8 +52,10 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  // Handle MCP request (stateless — new transport per request)
+  // Handle MCP request (stateless — new server+transport per request)
+  let mcpServer: McpServer | undefined;
   try {
+    mcpServer = createMcpServerInstance();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await mcpServer.connect(transport);
     await transport.handleRequest(req, res);
@@ -56,6 +64,11 @@ const httpServer = createServer(async (req, res) => {
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Internal server error" }));
+    }
+  } finally {
+    // Clean up: close the per-request server to release resources
+    if (mcpServer) {
+      await mcpServer.close().catch(() => {});
     }
   }
 });
