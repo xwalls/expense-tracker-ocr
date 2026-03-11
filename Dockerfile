@@ -19,10 +19,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Prisma client must be generated before next build
+# Generate Prisma client (writes engine binary into node_modules)
 RUN pnpm prisma generate
 
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 # ── runner ────────────────────────────────────────────────────────────────────
@@ -30,28 +31,22 @@ FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-# Disable Next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3000
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
-# Copy Next.js standalone output
-COPY --from=builder /app/public           ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static     ./.next/static
-
-# Prisma needs the schema and the generated client at runtime
-COPY --from=builder /app/prisma           ./prisma
-COPY --from=builder /app/node_modules/.pnpm ./node_modules/.pnpm
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# Copy built app
+COPY --from=builder --chown=nextjs:nodejs /app/public       ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next        ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/prisma       ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 
 USER nextjs
 
 EXPOSE 3000
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
 
-# next start is embedded in the standalone server.js
-CMD ["node", "server.js"]
+CMD ["pnpm", "start"]
