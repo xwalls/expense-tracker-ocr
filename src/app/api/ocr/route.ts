@@ -4,6 +4,8 @@ import { uploadImage } from "@/lib/cloudinary";
 import { prisma } from "@/lib/prisma";
 import OpenAI from "openai";
 
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
@@ -11,8 +13,6 @@ export async function POST(req: Request) {
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "OPENAI_API_KEY no configurada" }, { status: 500 });
   }
-
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   try {
     const formData = await req.formData();
