@@ -31,29 +31,29 @@ export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
+  const body = await req.json();
+  const {
+    amount,
+    bankDeposit,
+    despensa,
+    description,
+    source,
+    date,
+    periodStart,
+    periodEnd,
+    cfdiUuid,
+    cfdiXml,
+    employer,
+  } = body;
+
+  if (amount == null || bankDeposit == null || !description) {
+    return NextResponse.json(
+      { error: "Campos requeridos: amount, bankDeposit, description" },
+      { status: 400 }
+    );
+  }
+
   try {
-    const body = await req.json();
-    const {
-      amount,
-      bankDeposit,
-      despensa,
-      description,
-      source,
-      date,
-      periodStart,
-      periodEnd,
-      cfdiUuid,
-      cfdiXml,
-      employer,
-    } = body;
-
-    if (amount == null || bankDeposit == null || !description) {
-      return NextResponse.json(
-        { error: "Campos requeridos: amount, bankDeposit, description" },
-        { status: 400 }
-      );
-    }
-
     const income = await createIncome({
       amount,
       bankDeposit,
