@@ -15,6 +15,13 @@ model User {
   createdAt DateTime  @default(now())
   expenses  Expense[]
   budgets   Budget[]
+  incomes   Income[]
+}
+
+enum IncomeSource {
+  NOMINA
+  FACTURA
+  OTRO
 }
 
 model Category {
@@ -52,4 +59,24 @@ model Budget {
   createdAt  DateTime @default(now())
 
   @@unique([userId, categoryId, month, year])
+}
+
+model Income {
+  id          String       @id @default(cuid())
+  amount      Float
+  bankDeposit Float
+  despensa    Float        @default(0)
+  description String
+  source      IncomeSource @default(OTRO)
+  date        DateTime     @default(now())
+  periodStart DateTime?
+  periodEnd   DateTime?
+  cfdiUuid    String?      @unique
+  cfdiXml     String?      @db.Text
+  employer    String?
+  userId      String
+  user        User         @relation(fields: [userId], references: [id])
+  createdAt   DateTime     @default(now())
+
+  @@index([userId, date])
 }

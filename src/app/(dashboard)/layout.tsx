@@ -9,6 +9,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/dashboard/expenses", label: "Gastos" },
   { href: "/dashboard/scan", label: "Escanear" },
+  { href: "/dashboard/income", label: "Ingresos" },
   { href: "/dashboard/budgets", label: "Presupuestos" },
   { href: "/dashboard/categories", label: "Categorias" },
   { href: "/dashboard/export", label: "Exportar" },
