@@ -13,6 +13,7 @@ import {
   checkDuplicateUuid,
   getIncomeSummary,
 } from "@/lib/services";
+import type { IncomeSource } from "@prisma/client";
 import { resolveUserId } from "./auth";
 
 export function registerTools(server: McpServer) {
@@ -284,7 +285,15 @@ export function registerTools(server: McpServer) {
 
         const { suggestedIncome } = parsed;
         const income = await createIncome({
-          ...suggestedIncome,
+          amount: suggestedIncome.amount,
+          bankDeposit: suggestedIncome.bankDeposit,
+          despensa: suggestedIncome.despensa,
+          description: suggestedIncome.description,
+          source: suggestedIncome.source as IncomeSource,
+          date: suggestedIncome.date,
+          periodStart: suggestedIncome.periodStart ?? undefined,
+          periodEnd: suggestedIncome.periodEnd ?? undefined,
+          employer: suggestedIncome.employer,
           cfdiUuid: parsed.uuid,
           cfdiXml: xmlString,
           userId,
