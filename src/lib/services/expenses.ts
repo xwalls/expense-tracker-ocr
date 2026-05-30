@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 export interface CreateExpenseInput {
   amount: number;
@@ -8,6 +9,7 @@ export interface CreateExpenseInput {
   date?: string;
   receipt?: string | null;
   ocrText?: string | null;
+  receiptData?: Prisma.InputJsonValue | null;
 }
 
 export interface ListExpensesFilter {
@@ -18,7 +20,7 @@ export interface ListExpensesFilter {
 }
 
 export async function createExpense(input: CreateExpenseInput) {
-  const { amount, description, categoryId, userId, date, receipt, ocrText } = input;
+  const { amount, description, categoryId, userId, date, receipt, ocrText, receiptData } = input;
 
   if (!amount || !description || !categoryId) {
     throw new Error("Campos requeridos: amount, description, categoryId");
@@ -32,6 +34,7 @@ export async function createExpense(input: CreateExpenseInput) {
       categoryId,
       receipt: receipt || null,
       ocrText: ocrText || null,
+      receiptData: receiptData ?? undefined,
       userId,
     },
     include: { category: true },

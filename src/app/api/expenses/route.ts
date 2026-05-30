@@ -27,7 +27,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { amount, description, date, categoryId, ocrText, receipt } = body;
+    const { amount, description, date, categoryId, ocrText, receipt, receiptData } = body;
 
     const expense = await createExpense({
       amount,
@@ -37,6 +37,7 @@ export async function POST(req: Request) {
       date,
       receipt,
       ocrText,
+      receiptData,
     });
 
     return NextResponse.json(expense, { status: 201 });

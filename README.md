@@ -1,6 +1,6 @@
 # Expense Tracker OCR
 
-Aplicacion de seguimiento de gastos con escaneo de recibos mediante IA (GPT-4o Vision). Construida con Next.js, Prisma y PostgreSQL.
+Aplicacion de seguimiento de gastos con escaneo de recibos mediante IA. Construida con Next.js, Prisma y PostgreSQL.
 
 ![Screenshot](public/screenshot.png)
 
@@ -8,12 +8,12 @@ Aplicacion de seguimiento de gastos con escaneo de recibos mediante IA (GPT-4o V
 
 - Autenticacion de usuarios (registro/login con JWT)
 - CRUD de gastos con categorias
-- Escaneo de recibos con OCR (GPT-4o Vision)
+- Escaneo de recibos con OCR via MiniMax/OpenAI
 - Auto-categorizacion de gastos con IA
 - Administracion de categorias (nombre, icono, color)
 - Presupuestos mensuales por categoria
 - Dashboard con graficos (Recharts)
-- Subida de imagenes a Cloudinary
+- Desglose completo de tickets sin guardar imagenes
 - Exportacion de gastos
 - Drag & drop para subir recibos
 
@@ -22,8 +22,7 @@ Aplicacion de seguimiento de gastos con escaneo de recibos mediante IA (GPT-4o V
 - **Frontend:** Next.js 16, React 19, Tailwind CSS 4
 - **Backend:** Next.js API Routes
 - **Base de datos:** PostgreSQL + Prisma ORM
-- **IA/OCR:** OpenAI GPT-4o Vision
-- **Almacenamiento:** Cloudinary
+- **IA/OCR:** MiniMax MCP Understand Image / OpenAI fallback
 - **Graficos:** Recharts
 
 ## Instalacion
@@ -51,17 +50,20 @@ Copy-Item .env.example .env
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5448/expense_tracker"
-OPENAI_API_KEY="tu-api-key"
-CLOUDINARY_CLOUD_NAME="tu-cloud-name"
-CLOUDINARY_API_KEY="tu-api-key"
-CLOUDINARY_API_SECRET="tu-api-secret"
+DIRECT_URL="postgresql://postgres:postgres@localhost:5448/expense_tracker"
+MINIMAX_API_KEY="tu-api-key"
+MINIMAX_API_HOST="https://api.minimax.io"
+OPENAI_API_KEY="tu-api-key-opcional"
 ```
 
 Para Docker Compose (red interna de Docker), usa `.env.docker` basado en `.env.docker.example` y el host `db`:
 
 ```env
 DATABASE_URL="postgresql://expense_user:expense_pass@db:5432/expense_tracker"
+DIRECT_URL="postgresql://expense_user:expense_pass@db:5432/expense_tracker"
 ```
+
+En produccion con Supabase, usa `DATABASE_URL` para la conexion pooled/runtime y `DIRECT_URL` para migraciones de Prisma.
 
 ## Base de Datos
 
@@ -111,6 +113,7 @@ Usa este `DATABASE_URL` en tu `.env` local:
 
 ```env
 DATABASE_URL="postgresql://expense_user:expense_pass@localhost:5433/expense_tracker"
+DIRECT_URL="postgresql://expense_user:expense_pass@localhost:5433/expense_tracker"
 ```
 
 Luego corre la app local:

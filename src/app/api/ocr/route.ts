@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("OCR error:", error);
-    const message = error instanceof Error ? error.message : "Error al procesar la imagen con OpenAI";
+    const message = error instanceof Error ? error.message : "Error al procesar la imagen con IA";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
