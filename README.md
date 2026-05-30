@@ -50,7 +50,7 @@ Copy-Item .env.example .env
 ## Variables de Entorno
 
 ```env
-DATABASE_URL="postgresql://usuario:password@localhost:5432/expense_tracker"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5448/expense_tracker"
 OPENAI_API_KEY="tu-api-key"
 CLOUDINARY_CLOUD_NAME="tu-cloud-name"
 CLOUDINARY_API_KEY="tu-api-key"
@@ -65,7 +65,12 @@ DATABASE_URL="postgresql://expense_user:expense_pass@db:5432/expense_tracker"
 
 ## Base de Datos
 
+El proyecto incluye un `docker-compose.yml` con PostgreSQL 16.
+
 ```bash
+# Levantar la base de datos
+docker compose up -d
+
 # Sincronizar schema con la base de datos
 npx prisma db push
 
@@ -123,6 +128,13 @@ pnpm docker:db:down
 ## Desarrollo
 
 ```bash
+# 1. Levantar la base de datos
+docker compose up -d
+
+# 2. Instalar dependencias
+pnpm install
+
+# 3. Iniciar el servidor
 pnpm dev
 ```
 
