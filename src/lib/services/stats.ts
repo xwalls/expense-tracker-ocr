@@ -104,7 +104,6 @@ export async function getExpenseStats(filter: GetStatsFilter) {
     amount: e.amount,
     description: e.description,
     date: e.date.toISOString(),
-    receipt: e.receipt,
     category: { name: e.category.name, color: e.category.color },
   }));
 
@@ -127,7 +126,6 @@ export async function getExpenseStats(filter: GetStatsFilter) {
       amount: e.amount,
       description: e.description,
       date: e.date.toISOString(),
-      receipt: e.receipt,
       category: { name: e.category.name, color: e.category.color },
     }));
   }

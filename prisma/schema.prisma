@@ -8,14 +8,31 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  password  String
-  name      String
-  createdAt DateTime  @default(now())
-  expenses  Expense[]
-  budgets   Budget[]
-  incomes   Income[]
+  id               String            @id @default(cuid())
+  email            String            @unique
+  password         String
+  name             String
+  createdAt        DateTime          @default(now())
+  expenses         Expense[]
+  budgets          Budget[]
+  incomes          Income[]
+  accounts         Account[]
+  creditCards      CreditCard[]
+  installmentPlans InstallmentPlan[]
+}
+
+enum AccountType {
+  BANK
+  CASH
+  SAVINGS
+  VOUCHER
+  OTHER
+}
+
+enum InstallmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
 }
 
 enum IncomeSource {
@@ -24,13 +41,70 @@ enum IncomeSource {
   OTRO
 }
 
+model Account {
+  id             String      @id @default(cuid())
+  name           String
+  type           AccountType @default(BANK)
+  currentBalance Float
+  notes          String?
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model CreditCard {
+  id               String            @id @default(cuid())
+  name             String
+  currentBalance   Float
+  creditLimit      Float?
+  cutoffDay        Int
+  dueDay           Int
+  minimumPayment   Float?
+  notes            String?
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  installmentPlans InstallmentPlan[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([userId])
+}
+
 model Category {
-  id       String    @id @default(cuid())
-  name     String    @unique
-  icon     String    @default("tag")
-  color    String    @default("#6366f1")
-  expenses Expense[]
-  budgets  Budget[]
+  id               String            @id @default(cuid())
+  name             String            @unique
+  icon             String            @default("tag")
+  color            String            @default("#6366f1")
+  expenses         Expense[]
+  budgets          Budget[]
+  installmentPlans InstallmentPlan[]
+}
+
+model InstallmentPlan {
+  id                String            @id @default(cuid())
+  description       String
+  totalAmount       Float
+  installmentCount  Int
+  installmentAmount Float
+  startMonth        Int
+  startYear         Int
+  status            InstallmentStatus @default(ACTIVE)
+  notes             String?
+  userId            String
+  creditCardId      String
+  categoryId        String?
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditCard        CreditCard        @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+  category          Category?         @relation(fields: [categoryId], references: [id])
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([creditCardId])
+  @@index([categoryId])
 }
 
 model Expense {
@@ -40,6 +114,7 @@ model Expense {
   date        DateTime @default(now())
   receipt     String?
   ocrText     String?
+  receiptData Json?
   userId      String
   categoryId  String
   user        User     @relation(fields: [userId], references: [id])

@@ -21,3 +21,21 @@ export {
   getIncomeSummary,
 } from "./income";
 export type { CreateIncomeInput, ListIncomeFilter, IncomeSummary } from "./income";
+
+export { createAccount, deleteAccount, listAccounts, updateAccount } from "./accounts";
+export type { AccountInput } from "./accounts";
+
+export { createCreditCard, deleteCreditCard, listCreditCards, updateCreditCard } from "./credit-cards";
+export type { CreditCardInput } from "./credit-cards";
+
+export { getHouseholdSummary } from "./household-summary";
+export type { HouseholdSummaryFilter } from "./household-summary";
+
+export {
+  createInstallmentPlan,
+  deleteInstallmentPlan,
+  getInstallmentCommitmentSummary,
+  listInstallmentPlans,
+  updateInstallmentPlan,
+} from "./installment-plans";
+export type { InstallmentPlanInput } from "./installment-plans";

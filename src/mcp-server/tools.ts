@@ -178,7 +178,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Process Receipt",
       description:
-        "Send a receipt image (base64-encoded) for OCR analysis. Returns extracted amount, description, suggested category, and date. Optionally uploads to Cloudinary.",
+        "Send a receipt image (base64-encoded) for OCR analysis. Returns extracted amount, item breakdown, description, suggested category, and date without storing the image.",
       inputSchema: z.object({
         imageBase64: z.string().min(1).describe("Base64-encoded receipt image"),
         mimeType: z.string().optional().describe("Image MIME type (defaults to image/jpeg)"),

@@ -13,7 +13,6 @@ interface RecentExpense {
   amount: number;
   description: string;
   date: string;
-  receipt: string | null;
   category: { name: string; color: string };
 }
 
@@ -30,6 +29,36 @@ interface Stats {
   allTimeRecent: RecentExpense[];
 }
 
+interface HouseholdSummary {
+  availableCash: number;
+  creditCardDebt: number;
+  creditLimit: number;
+  availableCredit: number;
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  monthlyNet: number;
+  committedThisMonth: number;
+  committedNext3Months: number;
+  committedNext12Months: number;
+  activeInstallmentCount: number;
+  upcomingInstallments: {
+    id: string;
+    description: string;
+    installmentAmount: number;
+    creditCardName: string;
+    remainingInstallments: number;
+  }[];
+  accountCount: number;
+  creditCardCount: number;
+  upcomingCardDates: {
+    cardId: string;
+    cardName: string;
+    type: "cutoff" | "due";
+    day: number;
+    date: string;
+  }[];
+}
+
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const monthShort = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
@@ -44,6 +73,7 @@ const tabs: { id: TabId; label: string }[] = [
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [household, setHousehold] = useState<HouseholdSummary | null>(null);
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -51,9 +81,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/expenses/stats?month=${month}&year=${year}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then(setStats)
+    Promise.all([
+      fetch(`/api/expenses/stats?month=${month}&year=${year}`, { signal: controller.signal }).then((r) => r.json()),
+      fetch(`/api/household/summary?month=${month}&year=${year}`, { signal: controller.signal }).then((r) => r.json()),
+    ])
+      .then(([statsData, householdData]) => {
+        setStats(statsData);
+        setHousehold(householdData);
+      })
       .catch(() => {});
     return () => controller.abort();
   }, [month, year]);
@@ -99,7 +134,7 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">Resumen financiero personal</p>
+          <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">Resumen financiero familiar</p>
         </div>
 
         {/* Month navigation as tags */}
@@ -137,6 +172,102 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* Household overview */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-3">
+        <SummaryCard
+          label="Tenemos"
+          value={formatMoney(household?.availableCash ?? 0)}
+          hint={`${household?.accountCount ?? 0} cuentas`}
+          tone="emerald"
+        />
+        <SummaryCard
+          label="Debemos"
+          value={formatMoney(household?.creditCardDebt ?? 0)}
+          hint={`${household?.creditCardCount ?? 0} tarjetas`}
+          tone="red"
+        />
+        <SummaryCard
+          label="Credito disp."
+          value={formatMoney(household?.availableCredit ?? 0)}
+          hint={(household?.creditLimit ?? 0) > 0 ? `de ${formatMoney(household?.creditLimit ?? 0)}` : "sin limites"}
+          tone="indigo"
+        />
+        <SummaryCard
+          label="Ingresos mes"
+          value={formatMoney(household?.monthlyIncome ?? 0)}
+          hint="depositado"
+          tone="blue"
+        />
+        <SummaryCard
+          label="Gastos mes"
+          value={formatMoney(household?.monthlyExpenses ?? stats.total)}
+          hint={`${stats.count} movimientos`}
+          tone="amber"
+        />
+        <SummaryCard
+          label="Balance mes"
+          value={formatMoney(household?.monthlyNet ?? -(stats.total))}
+          hint="ingresos - gastos"
+          tone={(household?.monthlyNet ?? -(stats.total)) >= 0 ? "emerald" : "red"}
+        />
+        <SummaryCard
+          label="Compromiso"
+          value={formatMoney(household?.committedThisMonth ?? 0)}
+          hint={`${household?.activeInstallmentCount ?? 0} mensualidades`}
+          tone="purple"
+        />
+      </div>
+
+      {household?.upcomingCardDates?.length ? (
+        <div className="bg-white dark:bg-[#141e2e] rounded-xl border border-gray-200 dark:border-white/5 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">Proximas tarjetas</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Cortes y fechas limite que vienen primero.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {household.upcomingCardDates.map((item) => (
+              <div key={`${item.cardId}-${item.type}`} className="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.cardName}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{item.type === "cutoff" ? "Corte" : "Pago"} dia {item.day}</p>
+                </div>
+                <p className="text-sm font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                  {new Date(item.date).toLocaleDateString("es-MX", { day: "2-digit", month: "short" })}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {household?.upcomingInstallments?.length ? (
+        <div className="bg-white dark:bg-[#141e2e] rounded-xl border border-gray-200 dark:border-white/5 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">Mensualidades activas</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Proximos 3 meses: {formatMoney(household.committedNext3Months)} · Proximos 12 meses: {formatMoney(household.committedNext12Months)}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {household.upcomingInstallments.map((item) => (
+              <div key={item.id} className="rounded-lg bg-purple-50 dark:bg-purple-500/10 px-3 py-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.description}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{item.creditCardName} · restan {item.remainingInstallments}</p>
+                </div>
+                <p className="text-sm font-semibold tabular-nums text-purple-700 dark:text-purple-300">
+                  {formatMoney(item.installmentAmount)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Three panel overview */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -490,18 +621,12 @@ export default function DashboardPage() {
                 <div className="space-y-0 divide-y divide-gray-100 dark:divide-white/5">
                   {expensesToShow.map((exp) => (
                     <div key={exp.id} className="flex items-center gap-3 py-3 hover:bg-gray-50 dark:hover:bg-white/3 rounded-lg px-2 transition-colors">
-                      {exp.receipt ? (
-                        <a href={exp.receipt} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                          <img src={exp.receipt} alt="Recibo" className="w-8 h-8 rounded-lg object-cover border border-gray-200 dark:border-white/8" />
-                        </a>
-                      ) : (
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                          style={{ backgroundColor: exp.category.color + "20" }}
-                        >
-                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: exp.category.color }} />
-                        </div>
-                      )}
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: exp.category.color + "20" }}
+                      >
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: exp.category.color }} />
+                      </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">{exp.description}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -524,4 +649,37 @@ export default function DashboardPage() {
       </div>
     </div>
   );
+}
+
+function SummaryCard({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone: "emerald" | "red" | "indigo" | "blue" | "amber" | "purple";
+}) {
+  const classes = {
+    emerald: "border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    red: "border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-300",
+    indigo: "border-indigo-200 dark:border-indigo-500/20 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-300",
+    blue: "border-sky-200 dark:border-sky-500/20 bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    amber: "border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    purple: "border-purple-200 dark:border-purple-500/20 bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300",
+  }[tone];
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${classes}`}>
+      <p className="text-xs opacity-80">{label}</p>
+      <p className="text-xl font-bold tabular-nums truncate">{value}</p>
+      <p className="text-xs opacity-70 truncate">{hint}</p>
+    </div>
+  );
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(value);
 }

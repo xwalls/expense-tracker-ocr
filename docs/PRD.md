@@ -8,7 +8,7 @@
 
 ## 1. Resumen ejecutivo
 
-Expense Tracker OCR es una aplicación web que permite a usuarios registrar, organizar y analizar sus gastos personales. Su diferenciador principal es la integración con OpenAI GPT-4o para extraer datos automáticamente desde fotos de recibos (OCR), eliminando la entrada manual de datos. La aplicación está orientada a usuarios individuales que quieren control financiero sin fricción.
+Expense Tracker OCR es una aplicación web que permite a usuarios registrar, organizar y analizar sus gastos personales. Su diferenciador principal es la integración con IA visual para extraer datos automáticamente desde fotos de recibos (OCR), eliminando la entrada manual de datos. La aplicación está orientada a usuarios individuales que quieren control financiero sin fricción.
 
 ---
 
@@ -41,8 +41,8 @@ Reducir el tiempo de registro de un gasto a menos de 10 segundos mediante OCR au
 | Backend | Next.js API Routes (server-side) |
 | Base de datos | PostgreSQL via Prisma ORM v6 |
 | Autenticación | NextAuth v5 (beta) — JWT strategy |
-| OCR / IA | OpenAI GPT-4o-mini (visión + categorización) |
-| Almacenamiento de imágenes | Cloudinary |
+| OCR / IA | MiniMax MCP Understand Image / OpenAI fallback |
+| Almacenamiento de imágenes | No guarda imagenes; solo texto y datos extraidos |
 | Gráficos | Recharts v3 |
 | Deploy local | Docker Compose |
 
@@ -74,8 +74,8 @@ Reducir el tiempo de registro de un gasto a menos de 10 segundos mediante OCR au
 | amount | Float | Monto del gasto |
 | description | String | Descripción del gasto |
 | date | DateTime | Fecha del gasto |
-| receipt | String? | URL de imagen en Cloudinary |
 | ocrText | String? | Texto completo extraído por OCR |
+| receiptData | Json? | Desglose estructurado del ticket (items, subtotal, pago, folio) |
 | userId | String | FK → User |
 | categoryId | String | FK → Category |
 
@@ -115,18 +115,17 @@ Reducir el tiempo de registro de un gasto a menos de 10 segundos mediante OCR au
 - Upload de imagen (cámara o archivo)
 - Preview de la imagen seleccionada
 - Llamada a `POST /api/ocr`:
-  - Sube imagen a Cloudinary (si está configurado)
-  - Envía imagen en base64 a GPT-4o-mini (visión, `detail: "high"`)
-  - Extrae: monto, descripción, categoría sugerida, fecha del recibo, texto completo OCR
+  - Envía imagen temporalmente al proveedor OCR sin persistirla
+  - Extrae: monto, descripción, categoría sugerida, fecha, texto completo OCR y desglose por item
 - Formulario pre-rellenado con los datos extraídos (editable por el usuario)
-- Botón "Guardar gasto" que registra el gasto con la imagen asociada
+- Botón "Guardar gasto" que registra el gasto con el desglose estructurado; la imagen se descarta
 
 ### 7.4 Gastos
 - Listado paginado de gastos del usuario con filtros por categoría y mes
 - Crear gasto manualmente (monto, descripción, categoría, fecha)
 - Editar gasto existente
 - Eliminar gasto con confirmación
-- Visualización de imagen del recibo si está disponible
+- Visualización del texto OCR y desglose del ticket si está disponible
 
 ### 7.5 Presupuestos
 - Crear presupuesto mensual por categoría (monto límite + mes + año)
@@ -163,7 +162,7 @@ Reducir el tiempo de registro de un gasto a menos de 10 segundos mediante OCR au
 | PUT/DELETE | `/api/expenses/[id]` | Editar / eliminar gasto |
 | GET | `/api/expenses/stats` | Estadísticas por mes (dashboard) |
 | GET | `/api/expenses/export` | Exportar CSV |
-| POST | `/api/ocr` | OCR de recibo con OpenAI Vision |
+| POST | `/api/ocr` | OCR de recibo con IA visual |
 | POST | `/api/categorize` | Categorización automática por descripción |
 | GET/POST | `/api/categories` | Listar / crear categorías |
 | PUT/DELETE | `/api/categories/[id]` | Editar / eliminar categoría |
@@ -180,12 +179,12 @@ Todas las rutas requieren sesión JWT válida (`getSession()`).
 | Variable | Requerida | Descripción |
 |----------|-----------|-------------|
 | `DATABASE_URL` | Sí | PostgreSQL connection string |
+| `DIRECT_URL` | Sí | PostgreSQL direct connection string para migraciones de Prisma |
 | `NEXTAUTH_SECRET` | Sí | Secret para JWT de NextAuth |
 | `NEXTAUTH_URL` | Sí | URL base de la app |
-| `OPENAI_API_KEY` | Sí | API key de OpenAI (OCR + categorización) |
-| `CLOUDINARY_CLOUD_NAME` | Opcional | Cloud name de Cloudinary (sin esto, no guarda imagen) |
-| `CLOUDINARY_API_KEY` | Opcional | API key de Cloudinary |
-| `CLOUDINARY_API_SECRET` | Opcional | API secret de Cloudinary |
+| `MINIMAX_API_KEY` | Sí | API key de MiniMax para OCR de recibos |
+| `MINIMAX_API_HOST` | Opcional | Host de MiniMax, por defecto `https://api.minimax.io` |
+| `OPENAI_API_KEY` | Opcional | API key de OpenAI para fallback/categorización |
 
 ---
 
@@ -194,9 +193,9 @@ Todas las rutas requieren sesión JWT válida (`getSession()`).
 ### Flujo A — Registro de gasto por OCR (flujo principal)
 1. Usuario navega a **Escanear**
 2. Sube foto del recibo
-3. La app llama a OpenAI Vision → extrae monto, descripción, categoría y fecha
+3. La app llama al OCR visual → extrae monto, descripción, categoría, fecha y desglose
 4. Usuario revisa y ajusta los campos pre-rellenados
-5. Presiona "Guardar" → gasto registrado con imagen en Cloudinary
+5. Presiona "Guardar" → gasto registrado con texto OCR y desglose; la imagen se descarta
 
 ### Flujo B — Registro manual
 1. Usuario navega a **Gastos** → "Nuevo gasto"

@@ -7,13 +7,34 @@ interface Category {
   name: string;
 }
 
+interface ReceiptItem {
+  quantity: number | null;
+  unit: string | null;
+  sku: string | null;
+  description: string;
+  unitPrice: number | null;
+  total: number | null;
+  rawText: string;
+}
+
+interface ReceiptData {
+  merchant: string | null;
+  subtotal: number | null;
+  tax: number | null;
+  total: number | null;
+  paymentMethod: string | null;
+  cardLast4: string | null;
+  ticketNumber: string | null;
+  items: ReceiptItem[];
+}
+
 export default function ScanPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [ocrText, setOcrText] = useState("");
+  const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [processing, setProcessing] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [form, setForm] = useState({ amount: "", description: "", categoryId: "", date: "" });
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -29,6 +50,7 @@ export default function ScanPage() {
     setPreview(URL.createObjectURL(file));
     setProcessing(true);
     setOcrText("");
+    setReceiptData(null);
     setSaved(false);
     setError("");
 
@@ -45,7 +67,7 @@ export default function ScanPage() {
       }
 
       setOcrText(data.ocrText || "");
-      setImageUrl(data.imageUrl || null);
+      setReceiptData(data.receiptData || null);
 
       const catMatch = categories.find((c) => c.name === data.category);
 
@@ -99,14 +121,14 @@ export default function ScanPage() {
         const res = await fetch("/api/expenses", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...form, ocrText, receipt: imageUrl }),
+          body: JSON.stringify({ ...form, ocrText, receiptData }),
         });
         if (res.ok) {
           setSaved(true);
           setForm({ amount: "", description: "", categoryId: "", date: "" });
           setOcrText("");
+          setReceiptData(null);
           setPreview(null);
-          setImageUrl(null);
         }
       } finally {
         setSaving(false);
@@ -139,7 +161,7 @@ export default function ScanPage() {
                 {dragging ? "Suelta la imagen aqui" : "Click o arrastra una imagen de recibo"}
               </p>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">JPG, PNG - Tickets, facturas, recibos</p>
-              <p className="text-xs text-indigo-500 dark:text-indigo-400 mt-2">Procesado con GPT-4o Vision</p>
+              <p className="text-xs text-indigo-500 dark:text-indigo-400 mt-2">Procesado con IA vision</p>
             </div>
           )}
         </div>
@@ -164,6 +186,57 @@ export default function ScanPage() {
             <pre className="text-sm bg-gray-50 dark:bg-gray-900 p-4 rounded-lg whitespace-pre-wrap max-h-64 overflow-auto">
               {ocrText}
             </pre>
+
+            {receiptData?.items?.length ? (
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold">Desglose Detectado</h2>
+                  {receiptData.total != null && (
+                    <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">
+                      Total: {formatMoney(receiptData.total)}
+                    </span>
+                  )}
+                </div>
+                <div className="overflow-x-auto border dark:border-gray-700 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400">
+                      <tr>
+                        <th className="text-left px-3 py-2">Producto</th>
+                        <th className="text-right px-3 py-2">Cant.</th>
+                        <th className="text-right px-3 py-2">P. unit.</th>
+                        <th className="text-right px-3 py-2">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y dark:divide-gray-700">
+                      {receiptData.items.map((item, index) => (
+                        <tr key={`${item.rawText}-${index}`}>
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-gray-900 dark:text-gray-100">{item.description}</div>
+                            {item.sku && <div className="text-xs text-gray-400">SKU {item.sku}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                            {item.quantity ?? "-"}{item.unit ? ` ${item.unit}` : ""}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                            {item.unitPrice != null ? formatMoney(item.unitPrice) : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium">
+                            {item.total != null ? formatMoney(item.total) : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  {receiptData.subtotal != null && <span>Subtotal: {formatMoney(receiptData.subtotal)}</span>}
+                  {receiptData.tax != null && <span>Impuestos: {formatMoney(receiptData.tax)}</span>}
+                  {receiptData.paymentMethod && <span>Pago: {receiptData.paymentMethod}</span>}
+                  {receiptData.cardLast4 && <span>Tarjeta: ****{receiptData.cardLast4}</span>}
+                  {receiptData.ticketNumber && <span className="col-span-2">Ticket/Folio: {receiptData.ticketNumber}</span>}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border dark:border-gray-700">
@@ -228,4 +301,8 @@ export default function ScanPage() {
       )}
     </div>
   );
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(value);
 }

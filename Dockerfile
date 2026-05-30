@@ -4,6 +4,8 @@
 FROM node:20-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+RUN apk add --no-cache python3 py3-pip && \
+    pip3 install --no-cache-dir --break-system-packages uv
 RUN corepack enable
 
 # ── deps ──────────────────────────────────────────────────────────────────────

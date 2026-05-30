@@ -52,6 +52,33 @@ const navSections = [
         ),
       },
       {
+        href: "/dashboard/accounts",
+        label: "Cuentas",
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h.01M11 15h2M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/credit-cards",
+        label: "Tarjetas",
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 8.25h19.5m-18 3h16.5m-14.25 3h3m-6-8.25h18a1.5 1.5 0 011.5 1.5v9a1.5 1.5 0 01-1.5 1.5h-18A1.5 1.5 0 012.25 16.5v-9A1.5 1.5 0 013.75 6z" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/installments",
+        label: "Mensualidades",
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3M5 11h14M7 21h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v12a2 2 0 002 2zm2-6h.01M12 15h.01M15 15h.01M9 18h.01M12 18h.01" />
+          </svg>
+        ),
+      },
+      {
         href: "/dashboard/budgets",
         label: "Presupuestos",
         icon: (
