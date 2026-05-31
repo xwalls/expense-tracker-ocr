@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma, ReceiptDraftSource, ReceiptDraftStatus } from "@prisma/client";
+import {
+  buildReceiptFingerprint,
+  duplicateReviewPatch,
+  findReceiptDuplicateCandidate,
+} from "./receipt-duplicates";
 
 export interface ReceiptDraftInput {
   source?: ReceiptDraftSource;
@@ -34,8 +39,10 @@ export async function listReceiptDrafts(filter: ListReceiptDraftsFilter) {
 
 export async function createReceiptDraft(userId: string, input: ReceiptDraftInput) {
   const data = normalizeReceiptDraftInput(input, true) as Prisma.ReceiptDraftUncheckedCreateInput;
+  const receiptFingerprint = buildReceiptFingerprint(input);
+  const duplicate = await findReceiptDuplicateCandidate(userId, receiptFingerprint);
   return prisma.receiptDraft.create({
-    data: { ...data, userId },
+    data: { ...data, userId, receiptFingerprint, ...duplicateReviewPatch(duplicate) },
     include: { category: true, expense: true },
   });
 }
@@ -45,9 +52,17 @@ export async function updateReceiptDraft(id: string, userId: string, input: Rece
   if (!existing) return null;
 
   const data = normalizeReceiptDraftInput(input, false);
+  const receiptFingerprint = buildReceiptFingerprint({
+    amount: input.amount !== undefined ? input.amount : existing.amount,
+    date: input.date !== undefined ? input.date : existing.date,
+    description: input.description !== undefined ? input.description : existing.description,
+    receiptData: input.receiptData !== undefined ? input.receiptData : existing.receiptData,
+  });
+  const duplicate = await findReceiptDuplicateCandidate(userId, receiptFingerprint, id);
+
   return prisma.receiptDraft.update({
     where: { id },
-    data,
+    data: { ...data, receiptFingerprint, ...duplicateReviewPatch(duplicate) },
     include: { category: true, expense: true },
   });
 }
@@ -68,6 +83,21 @@ export async function saveReceiptDraft(id: string, userId: string) {
     throw new Error("Completa monto, descripcion y categoria antes de guardar");
   }
   const amount = draft.amount;
+  const receiptFingerprint = buildReceiptFingerprint({
+    amount,
+    date: draft.date,
+    description: draft.description,
+    receiptData: draft.receiptData,
+  });
+  const duplicate = await findReceiptDuplicateCandidate(userId, receiptFingerprint, id);
+
+  if (duplicate && !draft.needsReview) {
+    await prisma.receiptDraft.update({
+      where: { id },
+      data: { receiptFingerprint, ...duplicateReviewPatch(duplicate) },
+    });
+    throw new Error("Posible duplicado detectado. Revisalo antes de guardar o confirma guardar igual.");
+  }
 
   return prisma.$transaction(async (tx) => {
     const expense = await tx.expense.create({
@@ -78,6 +108,7 @@ export async function saveReceiptDraft(id: string, userId: string) {
         categoryId: draft.categoryId!,
         ocrText: draft.ocrText || null,
         receiptData: draft.receiptData === null ? undefined : draft.receiptData,
+        receiptFingerprint,
         userId,
       },
       include: { category: true },

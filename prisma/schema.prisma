@@ -79,6 +79,12 @@ enum ReceiptDraftStatus {
   SAVED
 }
 
+enum ReceiptDuplicateConfidence {
+  EXACT
+  HIGH
+  MEDIUM
+}
+
 enum IncomeSource {
   NOMINA
   FACTURA
@@ -208,6 +214,7 @@ model Expense {
   receipt                    String?
   ocrText                    String?
   receiptData                Json?
+  receiptFingerprint         String?
   userId                     String
   categoryId                 String
   user                       User                        @relation(fields: [userId], references: [id])
@@ -215,6 +222,8 @@ model Expense {
   recurringPaymentOccurrence RecurringPaymentOccurrence?
   receiptDraft               ReceiptDraft?
   createdAt                  DateTime                    @default(now())
+
+  @@index([userId, receiptFingerprint])
 }
 
 model TelegramConnection {
@@ -254,6 +263,12 @@ model ReceiptDraft {
   date                 DateTime?
   ocrText              String?
   receiptData          Json?
+  receiptFingerprint   String?
+  duplicateOfExpenseId String?
+  duplicateOfDraftId   String?
+  duplicateConfidence  ReceiptDuplicateConfidence?
+  duplicateReason      String?
+  needsReview          Boolean            @default(false)
   error                String?
   telegramChatId       String?
   telegramMessageId    Int?
@@ -269,6 +284,9 @@ model ReceiptDraft {
 
   @@unique([userId, telegramFileUniqueId])
   @@index([userId, status])
+  @@index([userId, receiptFingerprint])
+  @@index([duplicateOfExpenseId])
+  @@index([duplicateOfDraftId])
   @@index([source])
   @@index([categoryId])
   @@index([expenseId])
