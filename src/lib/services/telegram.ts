@@ -11,6 +11,8 @@ import {
 
 const PAIRING_TTL_MINUTES = 10;
 
+let telegramOcrQueue: Promise<void> = Promise.resolve();
+
 type TelegramUser = {
   id: number;
   first_name?: string;
@@ -134,14 +136,24 @@ async function handlePhoto(chatId: string, message: TelegramMessage) {
     telegramFileUniqueId: photo.file_unique_id,
   });
 
-  await sendTelegramMessage(chatId, "Recibí el ticket. Lo estoy procesando con OCR...");
+  await sendTelegramMessage(chatId, "Recibí el ticket. Lo dejé en cola y lo voy a procesar con OCR...");
 
+  await enqueueTelegramOcr(() => processTelegramReceiptDraft(draft.id, connection.userId, chatId, message, photo));
+}
+
+async function processTelegramReceiptDraft(
+  draftId: string,
+  userId: string,
+  chatId: string,
+  message: TelegramMessage,
+  photo: NonNullable<TelegramMessage["photo"]>[number]
+) {
   try {
     const imageBuffer = await downloadTelegramFile(photo.file_id);
     const result = await processReceipt({ imageBuffer, mimeType: "image/jpeg" });
     const categoryId = await findCategoryIdByName(result.category);
 
-    const updated = await updateReceiptDraft(draft.id, connection.userId, {
+    const updated = await updateReceiptDraft(draftId, userId, {
       source: "TELEGRAM",
       status: "READY",
       amount: result.amount,
@@ -160,7 +172,7 @@ async function handlePhoto(chatId: string, message: TelegramMessage) {
       `Listo. Draft creado: ${updated?.description || "Recibo"} · ${formatMoney(updated?.amount)}. Revisalo en Escanear: ${dashboardScanUrl()}`
     );
   } catch (error) {
-    await updateReceiptDraft(draft.id, connection.userId, {
+    await updateReceiptDraft(draftId, userId, {
       source: "TELEGRAM",
       status: "ERROR",
       error: error instanceof Error ? error.message : "Error al procesar ticket",
@@ -170,6 +182,11 @@ async function handlePhoto(chatId: string, message: TelegramMessage) {
     });
     await sendTelegramMessage(chatId, "No pude procesar ese ticket. Quedó como draft con error en Escanear.");
   }
+}
+
+function enqueueTelegramOcr(job: () => Promise<void>) {
+  telegramOcrQueue = telegramOcrQueue.then(job, job);
+  return telegramOcrQueue;
 }
 
 async function downloadTelegramFile(fileId: string) {

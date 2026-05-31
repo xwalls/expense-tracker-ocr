@@ -13,7 +13,10 @@ export async function POST(req: Request) {
   }
 
   try {
-    await handleTelegramUpdate(await req.json());
+    const update = await req.json();
+    void handleTelegramUpdate(update).catch((error) => {
+      console.error("Telegram webhook background error:", error);
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Telegram webhook error:", error);
