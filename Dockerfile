@@ -6,7 +6,7 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN apk add --no-cache python3 py3-pip && \
     pip3 install --no-cache-dir --break-system-packages uv
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@10.29.2 --activate
 
 # ── deps ──────────────────────────────────────────────────────────────────────
 FROM base AS deps
