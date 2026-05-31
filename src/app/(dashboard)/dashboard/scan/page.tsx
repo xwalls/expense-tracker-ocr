@@ -30,6 +30,9 @@ interface ReceiptData {
 }
 
 type DraftStatus = "queued" | "processing" | "ready" | "error" | "saving" | "saved";
+type PersistedDraftStatus = "QUEUED" | "PROCESSING" | "READY" | "ERROR" | "SAVED";
+type PersistedDraftSource = "WEB" | "TELEGRAM";
+type TabId = "upload" | "drafts";
 
 interface DraftForm {
   amount: string;
@@ -38,7 +41,7 @@ interface DraftForm {
   date: string;
 }
 
-interface ReceiptDraft {
+interface LocalReceiptDraft {
   id: string;
   fileName: string;
   previewUrl: string;
@@ -50,14 +53,46 @@ interface ReceiptDraft {
   receiptData: ReceiptData | null;
 }
 
+interface PersistedReceiptDraft {
+  id: string;
+  source: PersistedDraftSource;
+  status: PersistedDraftStatus;
+  amount: number | null;
+  description: string | null;
+  categoryId: string | null;
+  date: string | null;
+  ocrText: string | null;
+  receiptData: ReceiptData | null;
+  error: string | null;
+  telegramFileUniqueId: string | null;
+  category: { id: string; name: string; color: string } | null;
+  createdAt: string;
+}
+
+interface TelegramConnection {
+  id: string;
+  chatId: string;
+  username: string | null;
+  firstName: string | null;
+  status: "ACTIVE" | "REVOKED";
+}
+
 const MAX_BULK_FILES = 20;
 const emptyForm = { amount: "", description: "", categoryId: "", date: "" };
 const inputClass = "w-full mt-1 px-3 py-2 border dark:border-gray-600 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-700 dark:text-gray-100";
 
 export default function ScanPage() {
   const [categories, setCategories] = useState<Category[]>([]);
-  const [drafts, setDrafts] = useState<ReceiptDraft[]>([]);
+  const [drafts, setDrafts] = useState<LocalReceiptDraft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>("upload");
+  const [persistedDrafts, setPersistedDrafts] = useState<PersistedReceiptDraft[]>([]);
+  const [selectedPersistedDraftId, setSelectedPersistedDraftId] = useState<string | null>(null);
+  const [persistedLoading, setPersistedLoading] = useState(false);
+  const [telegramConnection, setTelegramConnection] = useState<TelegramConnection | null>(null);
+  const [pairingCode, setPairingCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+  const [draftActionError, setDraftActionError] = useState("");
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchSaving, setBatchSaving] = useState(false);
   const [error, setError] = useState("");
@@ -67,6 +102,8 @@ export default function ScanPage() {
 
   useEffect(() => {
     fetch("/api/categories").then((r) => r.json()).then(setCategories);
+    loadTelegramConnection();
+    loadPersistedDrafts();
   }, []);
 
   useEffect(() => {
@@ -75,9 +112,58 @@ export default function ScanPage() {
     };
   }, []);
 
-  const updateDraft = useCallback((id: string, patch: Partial<ReceiptDraft>) => {
+  const updateDraft = useCallback((id: string, patch: Partial<LocalReceiptDraft>) => {
     setDrafts((current) => current.map((draft) => (draft.id === id ? { ...draft, ...patch } : draft)));
   }, []);
+
+  async function loadTelegramConnection() {
+    const res = await fetch("/api/telegram/connection");
+    if (!res.ok) return;
+    const data = await res.json();
+    setTelegramConnection(data.connection?.status === "ACTIVE" ? data.connection : null);
+  }
+
+  async function loadPersistedDrafts() {
+    setPersistedLoading(true);
+    try {
+      const res = await fetch("/api/receipt-drafts");
+      if (!res.ok) return;
+      const data = await res.json();
+      const openDrafts = Array.isArray(data) ? data.filter((draft: PersistedReceiptDraft) => draft.status !== "SAVED") : [];
+      setPersistedDrafts(openDrafts);
+      setSelectedPersistedDraftId((current) => current || openDrafts[0]?.id || null);
+    } finally {
+      setPersistedLoading(false);
+    }
+  }
+
+  async function generatePairingCode() {
+    setTelegramLoading(true);
+    setDraftActionError("");
+    try {
+      const res = await fetch("/api/telegram/pairing-code", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setDraftActionError(data.error || "No se pudo generar codigo de Telegram");
+        return;
+      }
+      setPairingCode(data);
+    } finally {
+      setTelegramLoading(false);
+    }
+  }
+
+  async function disconnectTelegram() {
+    if (!confirm("Desconectar Telegram?")) return;
+    setTelegramLoading(true);
+    try {
+      await fetch("/api/telegram/connection", { method: "DELETE" });
+      setTelegramConnection(null);
+      setPairingCode(null);
+    } finally {
+      setTelegramLoading(false);
+    }
+  }
 
   const processFiles = useCallback(async (fileList: FileList | File[]) => {
     const selectedFiles = Array.from(fileList);
@@ -235,11 +321,63 @@ export default function ScanPage() {
     setError("");
   }
 
+  function updatePersistedDraftForm(id: string, patch: Partial<DraftForm>) {
+    setPersistedDrafts((current) => current.map((draft) => {
+      if (draft.id !== id) return draft;
+      return {
+        ...draft,
+        amount: patch.amount !== undefined ? Number(patch.amount) || null : draft.amount,
+        description: patch.description !== undefined ? patch.description : draft.description,
+        categoryId: patch.categoryId !== undefined ? patch.categoryId || null : draft.categoryId,
+        date: patch.date !== undefined ? patch.date || null : draft.date,
+      };
+    }));
+  }
+
+  async function savePersistedDraft(id: string) {
+    const draft = persistedDrafts.find((item) => item.id === id);
+    if (!draft) return;
+    if (!draft.amount || !draft.description || !draft.categoryId) {
+      setDraftActionError("Completa monto, descripcion y categoria antes de guardar.");
+      return;
+    }
+
+    setDraftActionError("");
+    await fetch(`/api/receipt-drafts/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: draft.amount,
+        description: draft.description,
+        categoryId: draft.categoryId,
+        date: draft.date ? draft.date.split("T")[0] : null,
+      }),
+    });
+
+    const res = await fetch(`/api/receipt-drafts/${id}/save`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setDraftActionError(data.error || "No se pudo guardar el draft");
+      return;
+    }
+
+    await loadPersistedDrafts();
+  }
+
+  async function deletePersistedDraft(id: string) {
+    if (!confirm("Eliminar este draft?")) return;
+    await fetch(`/api/receipt-drafts/${id}`, { method: "DELETE" });
+    setSelectedPersistedDraftId(null);
+    await loadPersistedDrafts();
+  }
+
   const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) ?? drafts[0] ?? null;
   const readyCount = drafts.filter((draft) => draft.status === "ready").length;
   const selectedReadyCount = drafts.filter((draft) => draft.selected && draft.status === "ready").length;
   const savedCount = drafts.filter((draft) => draft.status === "saved").length;
   const errorCount = drafts.filter((draft) => draft.status === "error").length;
+  const selectedPersistedDraft = persistedDrafts.find((draft) => draft.id === selectedPersistedDraftId) ?? persistedDrafts[0] ?? null;
+  const telegramDraftCount = persistedDrafts.filter((draft) => draft.source === "TELEGRAM").length;
 
   return (
     <div className="space-y-6">
@@ -258,6 +396,15 @@ export default function ScanPage() {
         )}
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <TabButton active={activeTab === "upload"} onClick={() => setActiveTab("upload")}>Subir fotos</TabButton>
+        <TabButton active={activeTab === "drafts"} onClick={() => { setActiveTab("drafts"); loadPersistedDrafts(); }}>
+          Drafts pendientes{telegramDraftCount > 0 ? ` (${telegramDraftCount})` : ""}
+        </TabButton>
+      </div>
+
+      {activeTab === "upload" && (
+        <>
       <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border dark:border-gray-700">
         <div
           onClick={() => fileRef.current?.click()}
@@ -437,6 +584,157 @@ export default function ScanPage() {
           )}
         </div>
       )}
+        </>
+      )}
+
+      {activeTab === "drafts" && (
+        <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-6">
+          <div className="space-y-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-5 space-y-4">
+              <div>
+                <h2 className="font-semibold text-gray-900 dark:text-white">Conectar Telegram</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Genera un codigo, mandalo al bot con /start CODIGO y tus tickets van a caer aca como drafts.</p>
+              </div>
+
+              {telegramConnection ? (
+                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 p-3">
+                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Telegram conectado</p>
+                  <p className="text-xs text-emerald-600/80 dark:text-emerald-300/80 mt-1">
+                    {telegramConnection.username ? `@${telegramConnection.username}` : telegramConnection.firstName || `Chat ${telegramConnection.chatId}`}
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 p-3 text-sm text-amber-700 dark:text-amber-300">
+                  Telegram no esta conectado todavia.
+                </div>
+              )}
+
+              {pairingCode && (
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-900 p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Mandale esto al bot:</p>
+                  <p className="font-mono text-lg font-bold text-gray-900 dark:text-white mt-1">/start {pairingCode.code}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Expira: {new Date(pairingCode.expiresAt).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button onClick={generatePairingCode} disabled={telegramLoading} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
+                  {telegramLoading ? "Generando..." : "Generar codigo"}
+                </button>
+                {telegramConnection && (
+                  <button onClick={disconnectTelegram} disabled={telegramLoading} className="px-3 py-2 border dark:border-gray-600 rounded-lg text-sm text-red-500 disabled:opacity-50">
+                    Desconectar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 overflow-hidden">
+              <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold">Drafts pendientes</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Telegram y futuros drafts persistidos.</p>
+                </div>
+                <button onClick={loadPersistedDrafts} disabled={persistedLoading} className="text-sm text-indigo-600 dark:text-indigo-400 disabled:opacity-50">
+                  Refrescar
+                </button>
+              </div>
+
+              {persistedLoading ? (
+                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Cargando drafts...</p>
+              ) : persistedDrafts.length === 0 ? (
+                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Todavia no hay drafts pendientes.</p>
+              ) : (
+                <div className="max-h-[640px] overflow-auto divide-y dark:divide-gray-700">
+                  {persistedDrafts.map((draft) => (
+                    <button
+                      key={draft.id}
+                      type="button"
+                      onClick={() => setSelectedPersistedDraftId(draft.id)}
+                      className={`w-full p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 ${selectedPersistedDraft?.id === draft.id ? "bg-indigo-50 dark:bg-indigo-500/10" : ""}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{draft.description || "Recibo pendiente"}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${persistedStatusClass(draft.status)}`}>{persistedStatusLabel(draft.status)}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">{draft.source === "TELEGRAM" ? "Telegram" : "Web"} · {new Date(draft.createdAt).toLocaleString("es-MX")}</p>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{draft.category?.name || "Sin categoria"}</span>
+                        {draft.amount != null && <span className="text-sm font-semibold tabular-nums">{formatMoney(draft.amount)}</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6 h-fit">
+            {draftActionError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">{draftActionError}</div>}
+            {!selectedPersistedDraft ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Selecciona un draft para revisarlo.</p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div>
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                    <div>
+                      <h2 className="font-semibold text-gray-900 dark:text-white">Draft de {selectedPersistedDraft.source === "TELEGRAM" ? "Telegram" : "Web"}</h2>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{new Date(selectedPersistedDraft.createdAt).toLocaleString("es-MX")}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${persistedStatusClass(selectedPersistedDraft.status)}`}>{persistedStatusLabel(selectedPersistedDraft.status)}</span>
+                  </div>
+
+                  {selectedPersistedDraft.error && (
+                    <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">{selectedPersistedDraft.error}</div>
+                  )}
+
+                  {selectedPersistedDraft.ocrText ? (
+                    <>
+                      <h3 className="font-semibold mb-3">Texto detectado</h3>
+                      <pre className="text-sm bg-gray-50 dark:bg-gray-900 p-4 rounded-lg whitespace-pre-wrap max-h-64 overflow-auto">
+                        {selectedPersistedDraft.ocrText}
+                      </pre>
+                      <ReceiptBreakdown receiptData={selectedPersistedDraft.receiptData} />
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Todavia no hay OCR disponible para este draft.</p>
+                  )}
+                </div>
+
+                <form onSubmit={(event) => { event.preventDefault(); savePersistedDraft(selectedPersistedDraft.id); }} className="space-y-3">
+                  <div>
+                    <label className="text-sm font-medium">Monto</label>
+                    <input type="number" step="0.01" value={selectedPersistedDraft.amount ?? ""} onChange={(e) => updatePersistedDraftForm(selectedPersistedDraft.id, { amount: e.target.value })} className={inputClass} required />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Descripcion</label>
+                    <input type="text" value={selectedPersistedDraft.description || ""} onChange={(e) => updatePersistedDraftForm(selectedPersistedDraft.id, { description: e.target.value })} className={inputClass} required />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Categoria</label>
+                    <select value={selectedPersistedDraft.categoryId || ""} onChange={(e) => updatePersistedDraftForm(selectedPersistedDraft.id, { categoryId: e.target.value })} className={inputClass} required>
+                      <option value="">Seleccionar</option>
+                      {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Fecha</label>
+                    <input type="date" value={selectedPersistedDraft.date ? selectedPersistedDraft.date.split("T")[0] : ""} onChange={(e) => updatePersistedDraftForm(selectedPersistedDraft.id, { date: e.target.value })} className={inputClass} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="submit" disabled={selectedPersistedDraft.status !== "READY"} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
+                      Guardar como gasto
+                    </button>
+                    <button type="button" onClick={() => deletePersistedDraft(selectedPersistedDraft.id)} className="px-3 py-2 border dark:border-gray-600 rounded-lg text-sm text-red-500">
+                      Eliminar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -512,6 +810,22 @@ function Metric({ label, value, tone }: { label: string; value: string; tone: "e
   );
 }
 
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-4 py-2 rounded-lg text-sm font-medium border transition ${
+        active
+          ? "border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+          : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function statusLabel(status: DraftStatus) {
   return {
     queued: "En cola",
@@ -531,6 +845,26 @@ function statusClass(status: DraftStatus) {
     error: "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-300",
     saving: "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-300",
     saved: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+  }[status];
+}
+
+function persistedStatusLabel(status: PersistedDraftStatus) {
+  return {
+    QUEUED: "En cola",
+    PROCESSING: "Procesando",
+    READY: "Listo",
+    ERROR: "Error",
+    SAVED: "Guardado",
+  }[status];
+}
+
+function persistedStatusClass(status: PersistedDraftStatus) {
+  return {
+    QUEUED: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300",
+    PROCESSING: "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-300",
+    READY: "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-300",
+    ERROR: "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-300",
+    SAVED: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
   }[status];
 }
 
