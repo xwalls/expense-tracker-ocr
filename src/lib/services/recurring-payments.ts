@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { logInfo, newTraceId } from "@/lib/structured-logger";
 import type { RecurringPaymentOccurrenceStatus, RecurringPaymentStatus, RecurringPaymentType } from "@prisma/client";
 
 export interface RecurringPaymentInput {
@@ -32,30 +33,70 @@ export async function listRecurringPayments(userId: string) {
 }
 
 export async function createRecurringPayment(userId: string, input: RecurringPaymentInput) {
+  const traceId = newTraceId("recurring-payment");
+  const startedAt = Date.now();
   const data = await normalizeRecurringPaymentInput(input);
-  return prisma.recurringPayment.create({
+
+  const payment = await prisma.recurringPayment.create({
     data: { ...data, userId },
     include: { category: true },
   });
+
+  logInfo("recurring-payment", "created", {
+    traceId,
+    recurringPaymentId: payment.id,
+    amount: payment.amount,
+    type: payment.type,
+    status: payment.status,
+    dueDay: payment.dueDay,
+    categoryId: payment.categoryId,
+    ms: Date.now() - startedAt,
+  });
+
+  return payment;
 }
 
 export async function updateRecurringPayment(id: string, userId: string, input: RecurringPaymentInput) {
+  const traceId = newTraceId("recurring-payment");
+  const startedAt = Date.now();
   const existing = await prisma.recurringPayment.findFirst({ where: { id, userId } });
-  if (!existing) return null;
+  if (!existing) {
+    logInfo("recurring-payment", "update_rejected", { traceId, recurringPaymentId: id, reason: "not_found", ms: Date.now() - startedAt });
+    return null;
+  }
 
   const data = await normalizeRecurringPaymentInput(input);
-  return prisma.recurringPayment.update({
+  const payment = await prisma.recurringPayment.update({
     where: { id },
     data,
     include: { category: true },
   });
+
+  logInfo("recurring-payment", "updated", {
+    traceId,
+    recurringPaymentId: payment.id,
+    amount: payment.amount,
+    type: payment.type,
+    status: payment.status,
+    dueDay: payment.dueDay,
+    categoryId: payment.categoryId,
+    ms: Date.now() - startedAt,
+  });
+
+  return payment;
 }
 
 export async function deleteRecurringPayment(id: string, userId: string) {
+  const traceId = newTraceId("recurring-payment");
+  const startedAt = Date.now();
   const existing = await prisma.recurringPayment.findFirst({ where: { id, userId } });
-  if (!existing) return null;
+  if (!existing) {
+    logInfo("recurring-payment", "delete_rejected", { traceId, recurringPaymentId: id, reason: "not_found", ms: Date.now() - startedAt });
+    return null;
+  }
 
   await prisma.recurringPayment.delete({ where: { id } });
+  logInfo("recurring-payment", "deleted", { traceId, recurringPaymentId: id, status: existing.status, ms: Date.now() - startedAt });
   return existing;
 }
 
@@ -76,12 +117,20 @@ export async function markRecurringPaymentOccurrencePaid(
   userId: string,
   input: PayRecurringPaymentOccurrenceInput = {},
 ) {
+  const traceId = newTraceId("recurring-payment");
+  const startedAt = Date.now();
   const occurrence = await prisma.recurringPaymentOccurrence.findFirst({
     where: { id, userId },
     include: { recurringPayment: { include: { category: true } } },
   });
-  if (!occurrence) return null;
-  if (occurrence.status === "PAID") throw new Error("Este pago ya fue marcado como pagado");
+  if (!occurrence) {
+    logInfo("recurring-payment", "occurrence_pay_rejected", { traceId, occurrenceId: id, reason: "not_found", ms: Date.now() - startedAt });
+    return null;
+  }
+  if (occurrence.status === "PAID") {
+    logInfo("recurring-payment", "occurrence_pay_rejected", { traceId, occurrenceId: id, reason: "already_paid", ms: Date.now() - startedAt });
+    throw new Error("Este pago ya fue marcado como pagado");
+  }
 
   const amount = input.amount == null || Number(input.amount) === 0 ? occurrence.amount : Number(input.amount);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("El monto pagado debe ser mayor a cero");
@@ -89,7 +138,7 @@ export async function markRecurringPaymentOccurrencePaid(
   const paidAt = input.paidAt ? new Date(input.paidAt) : new Date();
   if (Number.isNaN(paidAt.getTime())) throw new Error("La fecha de pago no es valida");
 
-  return prisma.$transaction(async (tx) => {
+  const paidOccurrence = await prisma.$transaction(async (tx) => {
     const expense = await tx.expense.create({
       data: {
         amount,
@@ -112,6 +161,28 @@ export async function markRecurringPaymentOccurrencePaid(
       include: { recurringPayment: { include: { category: true } }, expense: true },
     });
   });
+
+  logInfo("recurring-payment", "expense_created", {
+    traceId,
+    occurrenceId: paidOccurrence.id,
+    recurringPaymentId: paidOccurrence.recurringPaymentId,
+    expenseId: paidOccurrence.expenseId,
+    amount,
+    categoryId: occurrence.recurringPayment.categoryId,
+  });
+
+  logInfo("recurring-payment", "occurrence_paid", {
+    traceId,
+    occurrenceId: paidOccurrence.id,
+    recurringPaymentId: paidOccurrence.recurringPaymentId,
+    expenseId: paidOccurrence.expenseId,
+    amount: paidOccurrence.amount,
+    month: paidOccurrence.month,
+    year: paidOccurrence.year,
+    ms: Date.now() - startedAt,
+  });
+
+  return paidOccurrence;
 }
 
 export async function getRecurringPaymentCommitmentSummary(userId: string, month: number, year: number) {
@@ -187,8 +258,12 @@ async function normalizeRecurringPaymentInput(input: RecurringPaymentInput) {
 }
 
 async function generateRecurringPaymentOccurrences(userId: string, month: number, year: number) {
+  const traceId = newTraceId("recurring-payment");
+  const startedAt = Date.now();
   const payments = await prisma.recurringPayment.findMany({ where: { userId, status: "ACTIVE" } });
   const activePayments = payments.filter((payment) => isPaymentActiveInMonth(payment, month, year));
+  let generated = 0;
+  let refreshed = 0;
 
   for (const payment of activePayments) {
     const dueDate = safeDateUtc(year, month, payment.dueDay);
@@ -197,7 +272,7 @@ async function generateRecurringPaymentOccurrences(userId: string, month: number
     });
 
     if (!existing) {
-      await prisma.recurringPaymentOccurrence.create({
+      const occurrence = await prisma.recurringPaymentOccurrence.create({
         data: {
           recurringPaymentId: payment.id,
           userId,
@@ -206,6 +281,16 @@ async function generateRecurringPaymentOccurrences(userId: string, month: number
           amount: payment.amount,
           dueDate,
         },
+      });
+      generated++;
+      logInfo("recurring-payment", "occurrence_generated", {
+        traceId,
+        recurringPaymentId: payment.id,
+        occurrenceId: occurrence.id,
+        amount: occurrence.amount,
+        month,
+        year,
+        dueDate: occurrence.dueDate.toISOString(),
       });
       continue;
     }
@@ -219,15 +304,34 @@ async function generateRecurringPaymentOccurrences(userId: string, month: number
           status: dueDate >= startOfTodayUtc() ? "PENDING" : existing.status,
         },
       });
+      refreshed++;
     }
+  }
+
+  if (generated > 0 || refreshed > 0) {
+    logInfo("recurring-payment", "occurrences_checked", {
+      traceId,
+      month,
+      year,
+      activeCount: activePayments.length,
+      generated,
+      refreshed,
+      ms: Date.now() - startedAt,
+    });
   }
 }
 
 async function refreshOverdueOccurrences(userId: string, month: number, year: number) {
-  await prisma.recurringPaymentOccurrence.updateMany({
+  const traceId = newTraceId("recurring-payment");
+  const startedAt = Date.now();
+  const result = await prisma.recurringPaymentOccurrence.updateMany({
     where: { userId, month, year, status: "PENDING", dueDate: { lt: startOfTodayUtc() } },
     data: { status: "OVERDUE" },
   });
+
+  if (result.count > 0) {
+    logInfo("recurring-payment", "occurrence_marked_overdue", { traceId, month, year, count: result.count, ms: Date.now() - startedAt });
+  }
 }
 
 function sumOccurrences(occurrences: { amount: number }[]) {

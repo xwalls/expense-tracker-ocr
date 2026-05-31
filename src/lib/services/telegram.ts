@@ -155,6 +155,7 @@ async function handlePhoto(chatId: string, message: TelegramMessage, traceId: st
   }
 
   const draft = await createReceiptDraft(connection.userId, {
+    traceId,
     source: "TELEGRAM",
     status: "PROCESSING",
     telegramChatId: chatId,
@@ -203,6 +204,7 @@ async function processTelegramReceiptDraft(
     const categoryId = await findCategoryIdByName(result.category);
 
     const updated = await updateReceiptDraft(draftId, userId, {
+      traceId,
       source: "TELEGRAM",
       status: "READY",
       amount: result.amount,
@@ -224,6 +226,7 @@ async function processTelegramReceiptDraft(
     );
   } catch (error) {
     await updateReceiptDraft(draftId, userId, {
+      traceId,
       source: "TELEGRAM",
       status: "ERROR",
       error: error instanceof Error ? error.message : "Error al procesar ticket",
