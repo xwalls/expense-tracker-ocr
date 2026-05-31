@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 export interface ProcessReceiptInput {
   imageBuffer: Buffer;
   mimeType?: string;
+  traceId?: string;
 }
 
 export interface ReceiptItem {
@@ -60,32 +61,50 @@ type DateCandidate = ParsedDate & {
   source: "provided" | "text" | "billing-folio";
 };
 
+const DEFAULT_MINIMAX_MCP_TIMEOUT_MS = 180_000;
+
 export async function processReceipt(input: ProcessReceiptInput): Promise<OcrResult> {
-  const { imageBuffer, mimeType = "image/jpeg" } = input;
+  const { imageBuffer, mimeType = "image/jpeg", traceId = `ocr-${randomUUID()}` } = input;
+  const startedAt = Date.now();
+  ocrLog("started", { traceId, mimeType, bytes: imageBuffer.byteLength });
+
   const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
   const categoryNames = categories.map((c) => c.name);
+  ocrLog("categories_loaded", { traceId, count: categoryNames.length, ms: Date.now() - startedAt });
 
-  if (process.env.MINIMAX_API_KEY) {
-    return processWithMiniMax(imageBuffer, mimeType, categoryNames);
+  try {
+    if (process.env.MINIMAX_API_KEY) {
+      const result = await processWithMiniMax(imageBuffer, mimeType, categoryNames, traceId);
+      ocrLog("finished", { traceId, provider: "minimax", ms: Date.now() - startedAt });
+      return result;
+    }
+
+    if (process.env.OPENAI_API_KEY) {
+      const result = await processWithOpenAI(imageBuffer, mimeType, categoryNames, traceId);
+      ocrLog("finished", { traceId, provider: "openai", ms: Date.now() - startedAt });
+      return result;
+    }
+
+    throw new Error("MINIMAX_API_KEY u OPENAI_API_KEY no configurada");
+  } catch (error) {
+    ocrError("failed", error, { traceId, ms: Date.now() - startedAt });
+    throw error;
   }
-
-  if (process.env.OPENAI_API_KEY) {
-    return processWithOpenAI(imageBuffer, mimeType, categoryNames);
-  }
-
-  throw new Error("MINIMAX_API_KEY u OPENAI_API_KEY no configurada");
 }
 
 async function processWithMiniMax(
   imageBuffer: Buffer,
   mimeType: string,
-  categoryNames: string[]
+  categoryNames: string[],
+  traceId: string
 ): Promise<OcrResult> {
+  const startedAt = Date.now();
   const tempDir = join(tmpdir(), "expense-tracker-ocr");
   await mkdir(tempDir, { recursive: true });
 
   const imagePath = join(tempDir, `receipt-${randomUUID()}${extensionForMimeType(mimeType)}`);
   await writeFile(imagePath, imageBuffer);
+  ocrLog("minimax_temp_file_written", { traceId, bytes: imageBuffer.byteLength, ms: Date.now() - startedAt });
 
   const env = Object.fromEntries(
     Object.entries({
@@ -102,37 +121,57 @@ async function processWithMiniMax(
     env,
   });
   const client = new Client({ name: "expense-tracker-ocr", version: "0.1.0" });
+  const timeout = minimaxMcpTimeoutMs();
 
   try {
+    ocrLog("minimax_connect_started", { traceId, command: process.env.MINIMAX_MCP_COMMAND || "uvx" });
     await client.connect(transport);
+    ocrLog("minimax_connect_finished", { traceId, ms: Date.now() - startedAt });
+
+    const callStartedAt = Date.now();
+    ocrLog("minimax_understand_image_started", { traceId, timeout });
     const result = (await client.callTool({
       name: "understand_image",
       arguments: {
         image_source: imagePath,
         prompt: buildReceiptPrompt(categoryNames),
       },
-    })) as MiniMaxToolResult;
+    }, undefined, { timeout })) as MiniMaxToolResult;
+    ocrLog("minimax_understand_image_finished", { traceId, ms: Date.now() - callStartedAt });
 
     const text = getToolText(result);
     if (result.isError) {
       throw new Error(text || "MiniMax no pudo procesar la imagen");
     }
 
-    return normalizeOcrResult(parseJson(text), text, categoryNames);
+    const normalized = normalizeOcrResult(parseJson(text), text, categoryNames);
+    ocrLog("minimax_result_normalized", {
+      traceId,
+      amount: normalized.amount,
+      category: normalized.category,
+      hasText: Boolean(normalized.ocrText),
+      itemCount: normalized.receiptData.items.length,
+      ms: Date.now() - startedAt,
+    });
+    return normalized;
   } finally {
-    await client.close().catch(() => {});
-    await unlink(imagePath).catch(() => {});
+    await client.close().catch((error) => ocrError("minimax_client_close_failed", error, { traceId }));
+    await unlink(imagePath).catch((error) => ocrError("minimax_temp_file_delete_failed", error, { traceId }));
+    ocrLog("minimax_cleanup_finished", { traceId, ms: Date.now() - startedAt });
   }
 }
 
 async function processWithOpenAI(
   imageBuffer: Buffer,
   mimeType: string,
-  categoryNames: string[]
+  categoryNames: string[],
+  traceId: string
 ): Promise<OcrResult> {
+  const startedAt = Date.now();
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const base64 = imageBuffer.toString("base64");
 
+  ocrLog("openai_request_started", { traceId });
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -151,6 +190,7 @@ async function processWithOpenAI(
     max_tokens: 2500,
     temperature: 0.1,
   });
+  ocrLog("openai_request_finished", { traceId, ms: Date.now() - startedAt });
 
   const content = response.choices[0]?.message?.content?.trim() || "";
   return normalizeOcrResult(parseJson(content), content, categoryNames);
@@ -397,6 +437,31 @@ function extensionForMimeType(mimeType: string) {
   if (mimeType.includes("webp")) return ".webp";
   if (mimeType.includes("gif")) return ".gif";
   return ".jpg";
+}
+
+function minimaxMcpTimeoutMs() {
+  const configured = Number(process.env.MINIMAX_MCP_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MINIMAX_MCP_TIMEOUT_MS;
+}
+
+function ocrLog(event: string, details: Record<string, unknown> = {}) {
+  console.log(`[ocr] ${JSON.stringify({ event, ...details })}`);
+}
+
+function ocrError(event: string, error: unknown, details: Record<string, unknown> = {}) {
+  console.error(`[ocr] ${JSON.stringify({ event, ...details, ...errorDetails(error) })}`);
+}
+
+function errorDetails(error: unknown) {
+  const cause = error instanceof Error && "cause" in error ? error.cause : null;
+  const causeRecord = isRecord(cause) ? cause : null;
+
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    message: error instanceof Error ? error.message : String(error),
+    causeCode: typeof causeRecord?.code === "string" ? causeRecord.code : null,
+    causeHostname: typeof causeRecord?.hostname === "string" ? causeRecord.hostname : null,
+  };
 }
 
 function toNumber(value: unknown): number | null {
