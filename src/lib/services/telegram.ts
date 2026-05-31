@@ -10,6 +10,8 @@ import {
 } from "./receipt-drafts";
 
 const PAIRING_TTL_MINUTES = 10;
+const TELEGRAM_RETRY_ATTEMPTS = 3;
+const TELEGRAM_RETRY_BASE_DELAY_MS = 750;
 
 let telegramOcrQueue: Promise<void> = Promise.resolve();
 
@@ -76,19 +78,19 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return;
   }
 
-  await sendTelegramMessage(chatId, "Mandame una foto de un ticket o conectá tu cuenta con /start CODIGO desde la app.");
+  await safeSendTelegramMessage(chatId, "Mandame una foto de un ticket o conectá tu cuenta con /start CODIGO desde la app.");
 }
 
 async function handleStart(chatId: string, from: TelegramUser | undefined, text: string) {
   const code = text.split(/\s+/)[1]?.trim().toUpperCase();
   if (!code) {
-    await sendTelegramMessage(chatId, "Generá un código en la app y mandame /start CODIGO para conectar Telegram.");
+    await safeSendTelegramMessage(chatId, "Generá un código en la app y mandame /start CODIGO para conectar Telegram.");
     return;
   }
 
   const pairing = await prisma.telegramPairingCode.findUnique({ where: { code } });
   if (!pairing || pairing.consumedAt || pairing.expiresAt < new Date()) {
-    await sendTelegramMessage(chatId, "Ese código no existe o ya expiró. Generá uno nuevo en la app.");
+    await safeSendTelegramMessage(chatId, "Ese código no existe o ya expiró. Generá uno nuevo en la app.");
     return;
   }
 
@@ -109,13 +111,13 @@ async function handleStart(chatId: string, from: TelegramUser | undefined, text:
     await tx.telegramPairingCode.update({ where: { id: pairing.id }, data: { consumedAt: new Date() } });
   });
 
-  await sendTelegramMessage(chatId, "Telegram conectado. Mandame fotos de tickets y las voy a dejar como drafts para revisar en Escanear.");
+  await safeSendTelegramMessage(chatId, "Telegram conectado. Mandame fotos de tickets y las voy a dejar como drafts para revisar en Escanear.");
 }
 
 async function handlePhoto(chatId: string, message: TelegramMessage) {
   const connection = await prisma.telegramConnection.findUnique({ where: { chatId } });
   if (!connection || connection.status !== "ACTIVE") {
-    await sendTelegramMessage(chatId, "Este chat no está conectado. Generá un código en la app y mandame /start CODIGO.");
+    await safeSendTelegramMessage(chatId, "Este chat no está conectado. Generá un código en la app y mandame /start CODIGO.");
     return;
   }
 
@@ -124,7 +126,7 @@ async function handlePhoto(chatId: string, message: TelegramMessage) {
 
   const existing = await findTelegramReceiptDraft(connection.userId, photo.file_unique_id);
   if (existing) {
-    await sendTelegramMessage(chatId, "Ese ticket ya estaba recibido. Lo tenés en drafts de Escanear.");
+    await safeSendTelegramMessage(chatId, "Ese ticket ya estaba recibido. Lo tenés en drafts de Escanear.");
     return;
   }
 
@@ -136,7 +138,7 @@ async function handlePhoto(chatId: string, message: TelegramMessage) {
     telegramFileUniqueId: photo.file_unique_id,
   });
 
-  await sendTelegramMessage(chatId, "Recibí el ticket. Lo dejé en cola y lo voy a procesar con OCR...");
+  await safeSendTelegramMessage(chatId, "Recibí el ticket. Lo dejé en cola y lo voy a procesar con OCR...");
 
   await enqueueTelegramOcr(() => processTelegramReceiptDraft(draft.id, connection.userId, chatId, message, photo));
 }
@@ -167,7 +169,7 @@ async function processTelegramReceiptDraft(
       telegramFileUniqueId: photo.file_unique_id,
     });
 
-    await sendTelegramMessage(
+    await safeSendTelegramMessage(
       chatId,
       `Listo. Draft creado: ${updated?.description || "Recibo"} · ${formatMoney(updated?.amount)}. Revisalo en Escanear: ${dashboardScanUrl()}`
     );
@@ -180,7 +182,7 @@ async function processTelegramReceiptDraft(
       telegramMessageId: message.message_id,
       telegramFileUniqueId: photo.file_unique_id,
     });
-    await sendTelegramMessage(chatId, "No pude procesar ese ticket. Quedó como draft con error en Escanear.");
+    await safeSendTelegramMessage(chatId, "No pude procesar ese ticket. Quedó como draft con error en Escanear.");
   }
 }
 
@@ -192,7 +194,7 @@ function enqueueTelegramOcr(job: () => Promise<void>) {
 async function downloadTelegramFile(fileId: string) {
   const file = await callTelegram<{ file_path: string }>("getFile", { file_id: fileId });
   const token = requireTelegramBotToken();
-  const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  const res = await fetchWithRetry(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
   if (!res.ok) throw new Error("No se pudo descargar la imagen desde Telegram");
   return Buffer.from(await res.arrayBuffer());
 }
@@ -201,9 +203,17 @@ async function sendTelegramMessage(chatId: string, text: string) {
   await callTelegram("sendMessage", { chat_id: chatId, text });
 }
 
+async function safeSendTelegramMessage(chatId: string, text: string) {
+  try {
+    await sendTelegramMessage(chatId, text);
+  } catch (error) {
+    console.error("Telegram sendMessage failed:", error);
+  }
+}
+
 async function callTelegram<T>(method: string, body: Record<string, unknown>): Promise<T> {
   const token = requireTelegramBotToken();
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const res = await fetchWithRetry(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -211,6 +221,26 @@ async function callTelegram<T>(method: string, body: Record<string, unknown>): P
   const data = await res.json();
   if (!res.ok || !data.ok) throw new Error(data.description || `Telegram ${method} failed`);
   return data.result as T;
+}
+
+async function fetchWithRetry(input: string, init?: RequestInit) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= TELEGRAM_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      lastError = error;
+      if (attempt === TELEGRAM_RETRY_ATTEMPTS) break;
+      await delay(TELEGRAM_RETRY_BASE_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function requireTelegramBotToken() {
