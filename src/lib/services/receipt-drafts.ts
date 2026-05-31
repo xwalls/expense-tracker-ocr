@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { logInfo, newTraceId } from "@/lib/structured-logger";
 import type { Prisma, ReceiptDraftSource, ReceiptDraftStatus } from "@prisma/client";
 import {
   buildReceiptFingerprint,
@@ -7,6 +8,7 @@ import {
 } from "./receipt-duplicates";
 
 export interface ReceiptDraftInput {
+  traceId?: string;
   source?: ReceiptDraftSource;
   status?: ReceiptDraftStatus;
   amount?: number | null;
@@ -38,18 +40,50 @@ export async function listReceiptDrafts(filter: ListReceiptDraftsFilter) {
 }
 
 export async function createReceiptDraft(userId: string, input: ReceiptDraftInput) {
+  const traceId = input.traceId || newTraceId("receipt-draft");
+  const startedAt = Date.now();
   const data = normalizeReceiptDraftInput(input, true) as Prisma.ReceiptDraftUncheckedCreateInput;
   const receiptFingerprint = buildReceiptFingerprint(input);
   const duplicate = await findReceiptDuplicateCandidate(userId, receiptFingerprint);
-  return prisma.receiptDraft.create({
+
+  if (duplicate) {
+    logInfo("receipt-draft", "duplicate_detected", {
+      traceId,
+      source: input.source || "WEB",
+      duplicateConfidence: duplicate.confidence,
+      duplicateExpenseId: duplicate.expenseId,
+      duplicateDraftId: duplicate.draftId,
+    });
+  }
+
+  const draft = await prisma.receiptDraft.create({
     data: { ...data, userId, receiptFingerprint, ...duplicateReviewPatch(duplicate) },
     include: { category: true, expense: true },
   });
+
+  logInfo("receipt-draft", "created", {
+    traceId,
+    draftId: draft.id,
+    source: draft.source,
+    status: draft.status,
+    amount: draft.amount,
+    hasReceiptData: Boolean(draft.receiptData),
+    hasFingerprint: Boolean(draft.receiptFingerprint),
+    needsReview: draft.needsReview,
+    ms: Date.now() - startedAt,
+  });
+
+  return draft;
 }
 
 export async function updateReceiptDraft(id: string, userId: string, input: ReceiptDraftInput) {
+  const traceId = input.traceId || newTraceId("receipt-draft");
+  const startedAt = Date.now();
   const existing = await prisma.receiptDraft.findFirst({ where: { id, userId } });
-  if (!existing) return null;
+  if (!existing) {
+    logInfo("receipt-draft", "update_rejected", { traceId, draftId: id, reason: "not_found", ms: Date.now() - startedAt });
+    return null;
+  }
 
   const data = normalizeReceiptDraftInput(input, false);
   const receiptFingerprint = buildReceiptFingerprint({
@@ -60,26 +94,68 @@ export async function updateReceiptDraft(id: string, userId: string, input: Rece
   });
   const duplicate = await findReceiptDuplicateCandidate(userId, receiptFingerprint, id);
 
-  return prisma.receiptDraft.update({
+  if (duplicate) {
+    logInfo("receipt-draft", "duplicate_detected", {
+      traceId,
+      draftId: id,
+      source: existing.source,
+      duplicateConfidence: duplicate.confidence,
+      duplicateExpenseId: duplicate.expenseId,
+      duplicateDraftId: duplicate.draftId,
+    });
+  }
+
+  const draft = await prisma.receiptDraft.update({
     where: { id },
     data: { ...data, receiptFingerprint, ...duplicateReviewPatch(duplicate) },
     include: { category: true, expense: true },
   });
+
+  logInfo("receipt-draft", "updated", {
+    traceId,
+    draftId: draft.id,
+    source: draft.source,
+    status: draft.status,
+    amount: draft.amount,
+    hasReceiptData: Boolean(draft.receiptData),
+    hasFingerprint: Boolean(draft.receiptFingerprint),
+    needsReview: draft.needsReview,
+    ms: Date.now() - startedAt,
+  });
+
+  return draft;
 }
 
 export async function deleteReceiptDraft(id: string, userId: string) {
+  const traceId = newTraceId("receipt-draft");
+  const startedAt = Date.now();
   const existing = await prisma.receiptDraft.findFirst({ where: { id, userId } });
-  if (!existing) return null;
+  if (!existing) {
+    logInfo("receipt-draft", "delete_rejected", { traceId, draftId: id, reason: "not_found", ms: Date.now() - startedAt });
+    return null;
+  }
 
   await prisma.receiptDraft.delete({ where: { id } });
+  logInfo("receipt-draft", "deleted", { traceId, draftId: id, source: existing.source, status: existing.status, ms: Date.now() - startedAt });
   return existing;
 }
 
 export async function saveReceiptDraft(id: string, userId: string) {
+  const traceId = newTraceId("receipt-draft");
+  const startedAt = Date.now();
+  logInfo("receipt-draft", "save_started", { traceId, draftId: id });
+
   const draft = await prisma.receiptDraft.findFirst({ where: { id, userId } });
-  if (!draft) return null;
-  if (draft.status === "SAVED") throw new Error("Este draft ya fue guardado");
+  if (!draft) {
+    logInfo("receipt-draft", "save_rejected", { traceId, draftId: id, reason: "not_found", ms: Date.now() - startedAt });
+    return null;
+  }
+  if (draft.status === "SAVED") {
+    logInfo("receipt-draft", "save_rejected", { traceId, draftId: id, reason: "already_saved", ms: Date.now() - startedAt });
+    throw new Error("Este draft ya fue guardado");
+  }
   if (draft.amount == null || !draft.description || !draft.categoryId) {
+    logInfo("receipt-draft", "save_rejected", { traceId, draftId: id, reason: "missing_required_fields", ms: Date.now() - startedAt });
     throw new Error("Completa monto, descripcion y categoria antes de guardar");
   }
   const amount = draft.amount;
@@ -96,10 +172,19 @@ export async function saveReceiptDraft(id: string, userId: string) {
       where: { id },
       data: { receiptFingerprint, ...duplicateReviewPatch(duplicate) },
     });
+    logInfo("receipt-draft", "save_rejected", {
+      traceId,
+      draftId: id,
+      reason: "duplicate_requires_review",
+      duplicateConfidence: duplicate.confidence,
+      duplicateExpenseId: duplicate.expenseId,
+      duplicateDraftId: duplicate.draftId,
+      ms: Date.now() - startedAt,
+    });
     throw new Error("Posible duplicado detectado. Revisalo antes de guardar o confirma guardar igual.");
   }
 
-  return prisma.$transaction(async (tx) => {
+  const savedDraft = await prisma.$transaction(async (tx) => {
     const expense = await tx.expense.create({
       data: {
         amount,
@@ -120,6 +205,20 @@ export async function saveReceiptDraft(id: string, userId: string) {
       include: { category: true, expense: true },
     });
   });
+
+  logInfo("receipt-draft", "saved_as_expense", {
+    traceId,
+    draftId: id,
+    expenseId: savedDraft.expenseId,
+    source: draft.source,
+    amount,
+    categoryId: draft.categoryId,
+    hasReceiptData: Boolean(draft.receiptData),
+    hasFingerprint: Boolean(receiptFingerprint),
+    ms: Date.now() - startedAt,
+  });
+
+  return savedDraft;
 }
 
 export async function findTelegramReceiptDraft(userId: string, telegramFileUniqueId: string) {

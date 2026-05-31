@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { logError, logInfo, newTraceId } from "@/lib/structured-logger";
 import type { Prisma } from "@prisma/client";
 import { buildReceiptFingerprint } from "./receipt-duplicates";
 
@@ -11,6 +12,8 @@ export interface CreateExpenseInput {
   receipt?: string | null;
   ocrText?: string | null;
   receiptData?: Prisma.InputJsonValue | null;
+  source?: "manual" | "ocr" | "receipt-draft" | "recurring-payment" | "mcp";
+  traceId?: string;
 }
 
 export interface ListExpensesFilter {
@@ -21,28 +24,56 @@ export interface ListExpensesFilter {
 }
 
 export async function createExpense(input: CreateExpenseInput) {
-  const { amount, description, categoryId, userId, date, receipt, ocrText, receiptData } = input;
+  const { amount, description, categoryId, userId, date, receipt, ocrText, receiptData, source = "manual", traceId = newTraceId("expense") } = input;
+  const startedAt = Date.now();
+
+  logInfo("expense", "create_started", {
+    traceId,
+    source,
+    amount: Number(amount),
+    categoryId,
+    hasReceiptData: Boolean(receiptData),
+    hasOcrText: Boolean(ocrText),
+  });
 
   if (!amount || !description || !categoryId) {
+    logInfo("expense", "create_rejected", { traceId, source, reason: "missing_required_fields", ms: Date.now() - startedAt });
     throw new Error("Campos requeridos: amount, description, categoryId");
   }
 
-  const expense = await prisma.expense.create({
-    data: {
-      amount: Number(amount),
-      description,
-      date: date ? new Date(date) : new Date(),
-      categoryId,
+  try {
+    const receiptFingerprint = buildReceiptFingerprint({ amount, date, description, receiptData });
+    const expense = await prisma.expense.create({
+      data: {
+        amount: Number(amount),
+        description,
+        date: date ? new Date(date) : new Date(),
+        categoryId,
         receipt: receipt || null,
         ocrText: ocrText || null,
         receiptData: receiptData ?? undefined,
-        receiptFingerprint: buildReceiptFingerprint({ amount, date, description, receiptData }),
+        receiptFingerprint,
         userId,
-    },
-    include: { category: true },
-  });
+      },
+      include: { category: true },
+    });
 
-  return expense;
+    logInfo("expense", "created", {
+      traceId,
+      source,
+      expenseId: expense.id,
+      amount: expense.amount,
+      categoryId: expense.categoryId,
+      hasReceiptData: Boolean(expense.receiptData),
+      hasFingerprint: Boolean(receiptFingerprint),
+      ms: Date.now() - startedAt,
+    });
+
+    return expense;
+  } catch (error) {
+    logError("expense", "create_failed", error, { traceId, source, amount: Number(amount), categoryId, ms: Date.now() - startedAt });
+    throw error;
+  }
 }
 
 export async function listExpenses(filter: ListExpensesFilter) {
