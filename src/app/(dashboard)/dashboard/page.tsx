@@ -48,6 +48,22 @@ interface HouseholdSummary {
     creditCardName: string;
     remainingInstallments: number;
   }[];
+  recurringExpectedThisMonth: number;
+  recurringPaidThisMonth: number;
+  recurringPendingThisMonth: number;
+  recurringOverdueTotal: number;
+  recurringOverdueCount: number;
+  activeRecurringPaymentCount: number;
+  upcomingRecurringPayments: {
+    id: string;
+    description: string;
+    amount: number;
+    dueDate: string;
+    status: "PENDING" | "OVERDUE";
+    type: string;
+    categoryName: string;
+  }[];
+  projectedFreeCash: number;
   accountCount: number;
   creditCardCount: number;
   upcomingCardDates: {
@@ -174,7 +190,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Household overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-9 gap-3">
         <SummaryCard
           label="Tenemos"
           value={formatMoney(household?.availableCash ?? 0)}
@@ -212,10 +228,22 @@ export default function DashboardPage() {
           tone={(household?.monthlyNet ?? -(stats.total)) >= 0 ? "emerald" : "red"}
         />
         <SummaryCard
-          label="Compromiso"
+          label="Libre proy."
+          value={formatMoney(household?.projectedFreeCash ?? 0)}
+          hint="tras compromisos"
+          tone={(household?.projectedFreeCash ?? 0) >= 0 ? "emerald" : "red"}
+        />
+        <SummaryCard
+          label="Mensualidades"
           value={formatMoney(household?.committedThisMonth ?? 0)}
           hint={`${household?.activeInstallmentCount ?? 0} mensualidades`}
           tone="purple"
+        />
+        <SummaryCard
+          label="Recurrentes"
+          value={formatMoney(household?.recurringPendingThisMonth ?? 0)}
+          hint={`${household?.activeRecurringPaymentCount ?? 0} reglas`}
+          tone={(household?.recurringOverdueCount ?? 0) > 0 ? "red" : "amber"}
         />
       </div>
 
@@ -236,6 +264,32 @@ export default function DashboardPage() {
                 </div>
                 <p className="text-sm font-semibold tabular-nums text-gray-700 dark:text-gray-200">
                   {new Date(item.date).toLocaleDateString("es-MX", { day: "2-digit", month: "short" })}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {household?.upcomingRecurringPayments?.length ? (
+        <div className="bg-white dark:bg-[#141e2e] rounded-xl border border-gray-200 dark:border-white/5 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">Pagos recurrentes pendientes</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Esperado: {formatMoney(household.recurringExpectedThisMonth)} · Pagado: {formatMoney(household.recurringPaidThisMonth)} · Vencido: {formatMoney(household.recurringOverdueTotal)}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {household.upcomingRecurringPayments.map((item) => (
+              <div key={item.id} className={`rounded-lg px-3 py-2 flex items-center justify-between gap-3 ${recurringStatusClass(item.status)}`}>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.description}</p>
+                  <p className="text-xs opacity-75">{item.categoryName} · {recurringStatusLabel(item.status)} · vence {new Date(item.dueDate).toLocaleDateString("es-MX", { day: "2-digit", month: "short" })}</p>
+                </div>
+                <p className="text-sm font-semibold tabular-nums">
+                  {formatMoney(item.amount)}
                 </p>
               </div>
             ))}
@@ -682,4 +736,15 @@ function SummaryCard({
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(value);
+}
+
+function recurringStatusLabel(status: "PENDING" | "OVERDUE") {
+  return { PENDING: "pendiente", OVERDUE: "vencido" }[status];
+}
+
+function recurringStatusClass(status: "PENDING" | "OVERDUE") {
+  return {
+    PENDING: "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    OVERDUE: "bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300",
+  }[status];
 }

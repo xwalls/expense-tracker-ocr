@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getInstallmentCommitmentSummary } from "./installment-plans";
+import { getRecurringPaymentCommitmentSummary } from "./recurring-payments";
 
 export interface HouseholdSummaryFilter {
   userId: string;
@@ -13,12 +14,13 @@ export async function getHouseholdSummary(filter: HouseholdSummaryFilter) {
   const startDate = new Date(Date.UTC(year, month - 1, 1));
   const endDate = new Date(Date.UTC(year, month, 1));
 
-  const [accounts, creditCards, incomes, expenses, installments] = await Promise.all([
+  const [accounts, creditCards, incomes, expenses, installments, recurringPayments] = await Promise.all([
     prisma.account.findMany({ where: { userId: filter.userId }, orderBy: { name: "asc" } }),
     prisma.creditCard.findMany({ where: { userId: filter.userId }, orderBy: { name: "asc" } }),
     prisma.income.findMany({ where: { userId: filter.userId, date: { gte: startDate, lt: endDate } } }),
     prisma.expense.findMany({ where: { userId: filter.userId, date: { gte: startDate, lt: endDate } } }),
     getInstallmentCommitmentSummary(filter.userId, month, year),
+    getRecurringPaymentCommitmentSummary(filter.userId, month, year),
   ]);
 
   const availableCash = accounts.reduce((sum, account) => sum + account.currentBalance, 0);
@@ -44,6 +46,14 @@ export async function getHouseholdSummary(filter: HouseholdSummaryFilter) {
     committedNext12Months: installments.next12Months,
     activeInstallmentCount: installments.activeCount,
     upcomingInstallments: installments.upcoming,
+    recurringExpectedThisMonth: recurringPayments.expectedThisMonth,
+    recurringPaidThisMonth: recurringPayments.paidThisMonth,
+    recurringPendingThisMonth: recurringPayments.pendingThisMonth,
+    recurringOverdueTotal: recurringPayments.overdueTotal,
+    recurringOverdueCount: recurringPayments.overdueCount,
+    activeRecurringPaymentCount: recurringPayments.activeCount,
+    upcomingRecurringPayments: recurringPayments.upcoming,
+    projectedFreeCash: monthlyIncome - monthlyExpenses - installments.thisMonth - recurringPayments.pendingThisMonth,
     accountCount: accounts.length,
     creditCardCount: creditCards.length,
     upcomingCardDates: buildUpcomingCardDates(creditCards),
