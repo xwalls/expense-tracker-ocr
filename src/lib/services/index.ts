@@ -50,3 +50,21 @@ export {
   updateRecurringPayment,
 } from "./recurring-payments";
 export type { PayRecurringPaymentOccurrenceInput, RecurringPaymentInput } from "./recurring-payments";
+
+export {
+  createReceiptDraft,
+  deleteReceiptDraft,
+  findCategoryIdByName,
+  findTelegramReceiptDraft,
+  listReceiptDrafts,
+  saveReceiptDraft,
+  updateReceiptDraft,
+} from "./receipt-drafts";
+export type { ListReceiptDraftsFilter, ReceiptDraftInput } from "./receipt-drafts";
+
+export {
+  createTelegramPairingCode,
+  getTelegramConnection,
+  handleTelegramUpdate,
+  revokeTelegramConnection,
+} from "./telegram";

@@ -8,19 +8,22 @@ datasource db {
 }
 
 model User {
-  id                         String                       @id @default(cuid())
-  email                      String                       @unique
-  password                   String
-  name                       String
-  createdAt                  DateTime                     @default(now())
-  expenses                   Expense[]
-  budgets                    Budget[]
-  incomes                    Income[]
-  accounts                   Account[]
-  creditCards                CreditCard[]
-  installmentPlans           InstallmentPlan[]
-  recurringPayments          RecurringPayment[]
+  id                          String                       @id @default(cuid())
+  email                       String                       @unique
+  password                    String
+  name                        String
+  createdAt                   DateTime                     @default(now())
+  expenses                    Expense[]
+  budgets                     Budget[]
+  incomes                     Income[]
+  accounts                    Account[]
+  creditCards                 CreditCard[]
+  installmentPlans            InstallmentPlan[]
+  recurringPayments           RecurringPayment[]
   recurringPaymentOccurrences RecurringPaymentOccurrence[]
+  telegramConnection          TelegramConnection?
+  telegramPairingCodes        TelegramPairingCode[]
+  receiptDrafts               ReceiptDraft[]
 }
 
 enum AccountType {
@@ -56,6 +59,24 @@ enum RecurringPaymentOccurrenceStatus {
   PAID
   SKIPPED
   OVERDUE
+}
+
+enum TelegramConnectionStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum ReceiptDraftSource {
+  WEB
+  TELEGRAM
+}
+
+enum ReceiptDraftStatus {
+  QUEUED
+  PROCESSING
+  READY
+  ERROR
+  SAVED
 }
 
 enum IncomeSource {
@@ -105,6 +126,7 @@ model Category {
   budgets           Budget[]
   installmentPlans  InstallmentPlan[]
   recurringPayments RecurringPayment[]
+  receiptDrafts     ReceiptDraft[]
 }
 
 model InstallmentPlan {
@@ -191,7 +213,65 @@ model Expense {
   user                       User                        @relation(fields: [userId], references: [id])
   category                   Category                    @relation(fields: [categoryId], references: [id])
   recurringPaymentOccurrence RecurringPaymentOccurrence?
+  receiptDraft               ReceiptDraft?
   createdAt                  DateTime                    @default(now())
+}
+
+model TelegramConnection {
+  id             String                   @id @default(cuid())
+  userId         String                   @unique
+  chatId         String                   @unique
+  telegramUserId String?
+  username       String?
+  firstName      String?
+  status         TelegramConnectionStatus @default(ACTIVE)
+  user           User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([status])
+}
+
+model TelegramPairingCode {
+  id         String    @id @default(cuid())
+  userId     String
+  code       String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model ReceiptDraft {
+  id                   String             @id @default(cuid())
+  source               ReceiptDraftSource @default(WEB)
+  status               ReceiptDraftStatus @default(QUEUED)
+  amount               Float?
+  description          String?
+  date                 DateTime?
+  ocrText              String?
+  receiptData          Json?
+  error                String?
+  telegramChatId       String?
+  telegramMessageId    Int?
+  telegramFileUniqueId String?
+  userId               String
+  categoryId           String?
+  expenseId            String?            @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category             Category?          @relation(fields: [categoryId], references: [id])
+  expense              Expense?           @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([userId, telegramFileUniqueId])
+  @@index([userId, status])
+  @@index([source])
+  @@index([categoryId])
+  @@index([expenseId])
 }
 
 model Budget {
