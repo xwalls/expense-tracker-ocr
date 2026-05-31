@@ -51,6 +51,11 @@ interface LocalReceiptDraft {
   error: string;
   ocrText: string;
   receiptData: ReceiptData | null;
+  needsReview: boolean;
+  duplicateReason: string | null;
+  duplicateConfidence: "EXACT" | "HIGH" | "MEDIUM" | null;
+  duplicateOfExpenseId: string | null;
+  duplicateOfDraftId: string | null;
 }
 
 interface PersistedReceiptDraft {
@@ -64,6 +69,11 @@ interface PersistedReceiptDraft {
   ocrText: string | null;
   receiptData: ReceiptData | null;
   error: string | null;
+  needsReview: boolean;
+  duplicateReason: string | null;
+  duplicateConfidence: "EXACT" | "HIGH" | "MEDIUM" | null;
+  duplicateOfExpenseId: string | null;
+  duplicateOfDraftId: string | null;
   telegramFileUniqueId: string | null;
   category: { id: string; name: string; color: string } | null;
   createdAt: string;
@@ -196,6 +206,11 @@ export default function ScanPage() {
           error: "",
           ocrText: "",
           receiptData: null,
+          needsReview: false,
+          duplicateReason: null,
+          duplicateConfidence: null,
+          duplicateOfExpenseId: null,
+          duplicateOfDraftId: null,
         },
       };
     });
@@ -220,10 +235,21 @@ export default function ScanPage() {
         }
 
         const catMatch = categories.find((category) => category.name === data.category);
+        const duplicate = await checkReceiptDuplicate({
+          amount: data.amount,
+          description: data.description || "Recibo escaneado",
+          date: data.date,
+          receiptData: data.receiptData || null,
+        });
         updateDraft(item.draft.id, {
           status: "ready",
           ocrText: data.ocrText || "",
           receiptData: data.receiptData || null,
+          needsReview: !!duplicate?.candidate,
+          duplicateReason: duplicate?.candidate?.reason || null,
+          duplicateConfidence: duplicate?.candidate?.confidence || null,
+          duplicateOfExpenseId: duplicate?.candidate?.expenseId || null,
+          duplicateOfDraftId: duplicate?.candidate?.draftId || null,
           form: {
             amount: data.amount ? String(data.amount) : "",
             description: data.description || "Recibo escaneado",
@@ -358,10 +384,33 @@ export default function ScanPage() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setDraftActionError(data.error || "No se pudo guardar el draft");
+      await loadPersistedDrafts();
       return;
     }
 
     await loadPersistedDrafts();
+  }
+
+  async function checkReceiptDuplicate(input: {
+    amount: number | null;
+    description: string | null;
+    date: string | null;
+    receiptData: ReceiptData | null;
+  }) {
+    const res = await fetch("/api/receipt-duplicates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<{
+      candidate: {
+        confidence: "EXACT" | "HIGH" | "MEDIUM";
+        reason: string;
+        expenseId: string | null;
+        draftId: string | null;
+      } | null;
+    }>;
   }
 
   async function deletePersistedDraft(id: string) {
@@ -474,6 +523,7 @@ export default function ScanPage() {
                     <p className="text-xs text-gray-400 truncate mt-0.5">{draft.fileName}</p>
                     <div className="flex items-center justify-between gap-2 mt-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${statusClass(draft.status)}`}>{statusLabel(draft.status)}</span>
+                      {draft.needsReview && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-300">Revision</span>}
                       {draft.form.amount && <span className="text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200">{formatMoney(Number(draft.form.amount))}</span>}
                     </div>
                   </div>
@@ -507,6 +557,15 @@ export default function ScanPage() {
 
                 {selectedDraft.error && (
                   <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">{selectedDraft.error}</div>
+                )}
+
+                {selectedDraft.needsReview && (
+                  <DuplicateWarning
+                    reason={selectedDraft.duplicateReason}
+                    confidence={selectedDraft.duplicateConfidence}
+                    expenseId={selectedDraft.duplicateOfExpenseId}
+                    draftId={selectedDraft.duplicateOfDraftId}
+                  />
                 )}
 
                 {selectedDraft.ocrText ? (
@@ -575,7 +634,7 @@ export default function ScanPage() {
                       />
                     </div>
                     <button type="submit" disabled={selectedDraft.status !== "ready"} className="w-full py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
-                      {selectedDraft.status === "saving" ? "Guardando..." : "Guardar este gasto"}
+                      {selectedDraft.status === "saving" ? "Guardando..." : selectedDraft.needsReview ? "Guardar igual" : "Guardar este gasto"}
                     </button>
                   </form>
                 )}
@@ -656,6 +715,7 @@ export default function ScanPage() {
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{draft.description || "Recibo pendiente"}</p>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${persistedStatusClass(draft.status)}`}>{persistedStatusLabel(draft.status)}</span>
+                        {draft.needsReview && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-300">Revision</span>}
                       </div>
                       <p className="text-xs text-gray-400 mt-1">{draft.source === "TELEGRAM" ? "Telegram" : "Web"} · {new Date(draft.createdAt).toLocaleString("es-MX")}</p>
                       <div className="flex items-center justify-between mt-2">
@@ -686,6 +746,15 @@ export default function ScanPage() {
 
                   {selectedPersistedDraft.error && (
                     <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">{selectedPersistedDraft.error}</div>
+                  )}
+
+                  {selectedPersistedDraft.needsReview && (
+                    <DuplicateWarning
+                      reason={selectedPersistedDraft.duplicateReason}
+                      confidence={selectedPersistedDraft.duplicateConfidence}
+                      expenseId={selectedPersistedDraft.duplicateOfExpenseId}
+                      draftId={selectedPersistedDraft.duplicateOfDraftId}
+                    />
                   )}
 
                   {selectedPersistedDraft.ocrText ? (
@@ -723,7 +792,7 @@ export default function ScanPage() {
                   </div>
                   <div className="flex gap-2">
                     <button type="submit" disabled={selectedPersistedDraft.status !== "READY"} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
-                      Guardar como gasto
+                      {selectedPersistedDraft.needsReview ? "Guardar igual" : "Guardar como gasto"}
                     </button>
                     <button type="button" onClick={() => deletePersistedDraft(selectedPersistedDraft.id)} className="px-3 py-2 border dark:border-gray-600 rounded-lg text-sm text-red-500">
                       Eliminar
@@ -789,6 +858,30 @@ function ReceiptBreakdown({ receiptData }: { receiptData: ReceiptData | null }) 
         {receiptData.paymentMethod && <span>Pago: {receiptData.paymentMethod}</span>}
         {receiptData.cardLast4 && <span>Tarjeta: ****{receiptData.cardLast4}</span>}
         {receiptData.ticketNumber && <span className="col-span-2">Ticket/Folio: {receiptData.ticketNumber}</span>}
+      </div>
+    </div>
+  );
+}
+
+function DuplicateWarning({
+  reason,
+  confidence,
+  expenseId,
+  draftId,
+}: {
+  reason: string | null;
+  confidence: "EXACT" | "HIGH" | "MEDIUM" | null;
+  expenseId: string | null;
+  draftId: string | null;
+}) {
+  return (
+    <div className="mb-4 rounded-lg border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
+      <p className="font-semibold">Posible ticket duplicado</p>
+      <p className="mt-1">{reason || "Este ticket se parece a uno ya cargado. Revisalo antes de guardar."}</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs opacity-80">
+        {confidence && <span>Confianza: {confidence}</span>}
+        {expenseId && <span>Gasto existente: {expenseId.slice(0, 8)}</span>}
+        {draftId && <span>Draft existente: {draftId.slice(0, 8)}</span>}
       </div>
     </div>
   );

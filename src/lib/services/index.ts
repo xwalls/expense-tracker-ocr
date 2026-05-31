@@ -68,3 +68,10 @@ export {
   handleTelegramUpdate,
   revokeTelegramConnection,
 } from "./telegram";
+
+export {
+  buildReceiptFingerprint,
+  duplicateReviewPatch,
+  findReceiptDuplicateCandidate,
+} from "./receipt-duplicates";
+export type { ReceiptDuplicateCandidate, ReceiptFingerprintInput } from "./receipt-duplicates";

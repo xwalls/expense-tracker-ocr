@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import { buildReceiptFingerprint } from "./receipt-duplicates";
 
 export interface CreateExpenseInput {
   amount: number;
@@ -32,10 +33,11 @@ export async function createExpense(input: CreateExpenseInput) {
       description,
       date: date ? new Date(date) : new Date(),
       categoryId,
-      receipt: receipt || null,
-      ocrText: ocrText || null,
-      receiptData: receiptData ?? undefined,
-      userId,
+        receipt: receipt || null,
+        ocrText: ocrText || null,
+        receiptData: receiptData ?? undefined,
+        receiptFingerprint: buildReceiptFingerprint({ amount, date, description, receiptData }),
+        userId,
     },
     include: { category: true },
   });
