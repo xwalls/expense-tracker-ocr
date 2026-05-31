@@ -189,7 +189,7 @@ async function processTelegramReceiptDraft(
     const imageBuffer = await downloadTelegramFile(photo.file_id, traceId, draftId);
     telegramLog("telegram_file_downloaded", { traceId, chatId, draftId, bytes: imageBuffer.byteLength });
 
-    const result = await processReceipt({ imageBuffer, mimeType: "image/jpeg" });
+    const result = await processReceipt({ imageBuffer, mimeType: "image/jpeg", traceId });
     telegramLog("ocr_finished", {
       traceId,
       chatId,

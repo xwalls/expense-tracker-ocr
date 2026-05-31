@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(bytes);
     const mimeType = file.type || "image/jpeg";
 
-    const result = await processReceipt({ imageBuffer: buffer, mimeType });
+    const result = await processReceipt({ imageBuffer: buffer, mimeType, traceId: `web-ocr-${crypto.randomUUID()}` });
 
     return NextResponse.json(result);
   } catch (error) {
