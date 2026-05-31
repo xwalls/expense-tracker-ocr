@@ -39,3 +39,14 @@ export {
   updateInstallmentPlan,
 } from "./installment-plans";
 export type { InstallmentPlanInput } from "./installment-plans";
+
+export {
+  createRecurringPayment,
+  deleteRecurringPayment,
+  getRecurringPaymentCommitmentSummary,
+  listRecurringPaymentOccurrences,
+  listRecurringPayments,
+  markRecurringPaymentOccurrencePaid,
+  updateRecurringPayment,
+} from "./recurring-payments";
+export type { PayRecurringPaymentOccurrenceInput, RecurringPaymentInput } from "./recurring-payments";

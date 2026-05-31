@@ -8,17 +8,19 @@ datasource db {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  email            String            @unique
-  password         String
-  name             String
-  createdAt        DateTime          @default(now())
-  expenses         Expense[]
-  budgets          Budget[]
-  incomes          Income[]
-  accounts         Account[]
-  creditCards      CreditCard[]
-  installmentPlans InstallmentPlan[]
+  id                         String                       @id @default(cuid())
+  email                      String                       @unique
+  password                   String
+  name                       String
+  createdAt                  DateTime                     @default(now())
+  expenses                   Expense[]
+  budgets                    Budget[]
+  incomes                    Income[]
+  accounts                   Account[]
+  creditCards                CreditCard[]
+  installmentPlans           InstallmentPlan[]
+  recurringPayments          RecurringPayment[]
+  recurringPaymentOccurrences RecurringPaymentOccurrence[]
 }
 
 enum AccountType {
@@ -33,6 +35,27 @@ enum InstallmentStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+}
+
+enum RecurringPaymentType {
+  RENT
+  SERVICE
+  MAINTENANCE
+  SUBSCRIPTION
+  OTHER
+}
+
+enum RecurringPaymentStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+enum RecurringPaymentOccurrenceStatus {
+  PENDING
+  PAID
+  SKIPPED
+  OVERDUE
 }
 
 enum IncomeSource {
@@ -74,13 +97,14 @@ model CreditCard {
 }
 
 model Category {
-  id               String            @id @default(cuid())
-  name             String            @unique
-  icon             String            @default("tag")
-  color            String            @default("#6366f1")
-  expenses         Expense[]
-  budgets          Budget[]
-  installmentPlans InstallmentPlan[]
+  id                String             @id @default(cuid())
+  name              String             @unique
+  icon              String             @default("tag")
+  color             String             @default("#6366f1")
+  expenses          Expense[]
+  budgets           Budget[]
+  installmentPlans  InstallmentPlan[]
+  recurringPayments RecurringPayment[]
 }
 
 model InstallmentPlan {
@@ -107,19 +131,67 @@ model InstallmentPlan {
   @@index([categoryId])
 }
 
-model Expense {
-  id          String   @id @default(cuid())
-  amount      Float
+model RecurringPayment {
+  id          String                 @id @default(cuid())
   description String
-  date        DateTime @default(now())
-  receipt     String?
-  ocrText     String?
-  receiptData Json?
+  amount      Float
+  type        RecurringPaymentType   @default(OTHER)
+  dueDay      Int
+  startMonth  Int
+  startYear   Int
+  endMonth    Int?
+  endYear     Int?
+  status      RecurringPaymentStatus @default(ACTIVE)
+  notes       String?
   userId      String
   categoryId  String
-  user        User     @relation(fields: [userId], references: [id])
-  category    Category @relation(fields: [categoryId], references: [id])
-  createdAt   DateTime @default(now())
+  user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    Category               @relation(fields: [categoryId], references: [id])
+  occurrences RecurringPaymentOccurrence[]
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@index([userId])
+  @@index([categoryId])
+}
+
+model RecurringPaymentOccurrence {
+  id                 String                           @id @default(cuid())
+  recurringPaymentId String
+  userId             String
+  month              Int
+  year               Int
+  amount             Float
+  dueDate            DateTime
+  status             RecurringPaymentOccurrenceStatus @default(PENDING)
+  paidAt             DateTime?
+  expenseId          String?                          @unique
+  recurringPayment   RecurringPayment                 @relation(fields: [recurringPaymentId], references: [id], onDelete: Cascade)
+  user               User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expense            Expense?                         @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @updatedAt
+
+  @@unique([recurringPaymentId, month, year])
+  @@index([userId, year, month])
+  @@index([recurringPaymentId])
+  @@index([expenseId])
+}
+
+model Expense {
+  id                         String                      @id @default(cuid())
+  amount                     Float
+  description                String
+  date                       DateTime                    @default(now())
+  receipt                    String?
+  ocrText                    String?
+  receiptData                Json?
+  userId                     String
+  categoryId                 String
+  user                       User                        @relation(fields: [userId], references: [id])
+  category                   Category                    @relation(fields: [categoryId], references: [id])
+  recurringPaymentOccurrence RecurringPaymentOccurrence?
+  createdAt                  DateTime                    @default(now())
 }
 
 model Budget {
