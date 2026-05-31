@@ -26,6 +26,23 @@ interface Income {
   date: string;
 }
 
+interface BulkXmlResult {
+  fileName: string;
+  status: "imported" | "duplicate" | "error";
+  message: string;
+  uuid: string | null;
+  tipo: "NOMINA" | "FACTURA" | null;
+  employer: string | null;
+  date: string | null;
+  amount: number | null;
+  bankDeposit: number | null;
+  despensa: number | null;
+  incomeId: string | null;
+  existingId: string | null;
+}
+
+const MAX_BULK_FILES = 20;
+
 const SOURCE_LABELS: Record<string, string> = {
   NOMINA: "Nómina",
   FACTURA: "Factura",
@@ -43,6 +60,7 @@ export default function IncomePage() {
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [preview, setPreview] = useState<IncomePreview | null>(null);
+  const [bulkResults, setBulkResults] = useState<BulkXmlResult[]>([]);
   const [uploadError, setUploadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -80,6 +98,7 @@ export default function IncomePage() {
   const processFile = useCallback(async (file: File) => {
     setProcessing(true);
     setUploadError("");
+    setBulkResults([]);
     setPreview(null);
     setSaved(false);
     setSaveError("");
@@ -127,16 +146,58 @@ export default function IncomePage() {
     }
   }, []);
 
+  const processBulkFiles = useCallback(async (files: File[]) => {
+    setUploadError("");
+    setBulkResults([]);
+    setPreview(null);
+    setSaved(false);
+    setSaveError("");
+
+    if (files.length > MAX_BULK_FILES) {
+      setUploadError(`Solo se pueden importar ${MAX_BULK_FILES} XML por lote.`);
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("xml", file);
+      }
+
+      const res = await fetch("/api/income/upload/bulk", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setUploadError(data.error || "Error al importar XML en lote");
+        return;
+      }
+
+      setBulkResults(Array.isArray(data.results) ? data.results : []);
+      setSaved(Number(data.imported || 0) > 0);
+      loadIncomes();
+    } catch {
+      setUploadError("Error al conectar con el servidor");
+    } finally {
+      setProcessing(false);
+    }
+  }, [loadIncomes]);
+
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    if (files.length === 1) processFile(files[0]);
+    else processBulkFiles(files);
+    e.target.value = "";
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+    if (files.length === 1) processFile(files[0]);
+    else processBulkFiles(files);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -218,6 +279,9 @@ export default function IncomePage() {
 
   const totalNeto = incomes.reduce((sum, i) => sum + i.amount, 0);
   const totalDeposit = incomes.reduce((sum, i) => sum + i.bankDeposit, 0);
+  const importedCount = bulkResults.filter((result) => result.status === "imported").length;
+  const duplicateCount = bulkResults.filter((result) => result.status === "duplicate").length;
+  const errorCount = bulkResults.filter((result) => result.status === "error").length;
 
   const months = [
     { value: "01", label: "Enero" },
@@ -256,11 +320,12 @@ export default function IncomePage() {
         >
           <div className="text-4xl text-gray-300 dark:text-gray-600 mb-2">&#128196;</div>
           <p className="text-gray-500 dark:text-gray-400">
-            {dragging ? "Suelta el archivo XML aqui" : "Click o arrastra tu XML de nómina (CFDI)"}
+            {dragging ? "Solta los XML aca" : "Click o arrastra uno o varios XML de nómina (CFDI)"}
           </p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Solo archivos .xml</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Solo archivos .xml · maximo {MAX_BULK_FILES} por lote</p>
+          <p className="text-xs text-indigo-500 dark:text-indigo-400 mt-2">Varios XML se importan automaticamente si son validos y no duplicados.</p>
         </div>
-        <input ref={fileRef} type="file" accept=".xml" onChange={handleFile} className="hidden" />
+        <input ref={fileRef} type="file" accept=".xml" multiple onChange={handleFile} className="hidden" />
 
         {processing && (
           <div className="mt-4 flex items-center gap-3">
@@ -277,10 +342,62 @@ export default function IncomePage() {
 
         {saved && (
           <div className="mt-4 text-green-600 dark:text-green-400 font-medium p-4 bg-green-50 dark:bg-green-900/30 rounded-lg">
-            Ingreso guardado correctamente.
+            {bulkResults.length > 0 ? `${importedCount} CFDI importado${importedCount === 1 ? "" : "s"} correctamente.` : "Ingreso guardado correctamente."}
           </div>
         )}
       </div>
+
+      {bulkResults.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 overflow-hidden">
+          <div className="p-4 border-b dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Resultado de importacion CFDI</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Los XML validos se importaron automaticamente; duplicados y errores quedaron bloqueados.</p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{importedCount} importados</span>
+              <span className="px-2 py-1 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300">{duplicateCount} duplicados</span>
+              <span className="px-2 py-1 rounded-full bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300">{errorCount} errores</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400">
+                <tr>
+                  <th className="text-left px-4 py-3">Archivo</th>
+                  <th className="text-left px-4 py-3">Estado</th>
+                  <th className="text-left px-4 py-3">Emisor</th>
+                  <th className="text-left px-4 py-3">Tipo</th>
+                  <th className="text-left px-4 py-3">Fecha</th>
+                  <th className="text-right px-4 py-3">Total</th>
+                  <th className="text-right px-4 py-3">Deposito</th>
+                  <th className="text-right px-4 py-3">Despensa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y dark:divide-gray-700">
+                {bulkResults.map((result, index) => (
+                  <tr key={`${result.fileName}-${index}`} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                    <td className="px-4 py-3 min-w-52">
+                      <p className="font-medium text-gray-900 dark:text-gray-100 truncate">{result.fileName}</p>
+                      {result.uuid && <p className="font-mono text-[11px] text-gray-400 truncate">{result.uuid}</p>}
+                      {result.message && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{result.message}</p>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${bulkStatusClass(result.status)}`}>{bulkStatusLabel(result.status)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300 min-w-48">{result.employer || "-"}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{result.tipo ? SOURCE_LABELS[result.tipo] : "-"}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{result.date || "-"}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{result.amount != null ? `$${result.amount.toFixed(2)}` : "-"}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{result.bankDeposit != null ? `$${result.bankDeposit.toFixed(2)}` : "-"}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{result.despensa != null ? `$${result.despensa.toFixed(2)}` : "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Preview Card */}
       {preview && (
@@ -531,4 +648,20 @@ export default function IncomePage() {
       </div>
     </div>
   );
+}
+
+function bulkStatusLabel(status: BulkXmlResult["status"]) {
+  return {
+    imported: "Importado",
+    duplicate: "Duplicado",
+    error: "Error",
+  }[status];
+}
+
+function bulkStatusClass(status: BulkXmlResult["status"]) {
+  return {
+    imported: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    duplicate: "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    error: "bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300",
+  }[status];
 }
