@@ -27,6 +27,7 @@ model User {
   installmentPlans            InstallmentPlan[]
   recurringPayments           RecurringPayment[]
   recurringPaymentOccurrences RecurringPaymentOccurrence[]
+  monthlyFamilyPlans          MonthlyFamilyPlan[]
   telegramConnection          TelegramConnection?
   telegramPairingCodes        TelegramPairingCode[]
   receiptDrafts               ReceiptDraft[]
@@ -65,6 +66,11 @@ enum RecurringPaymentOccurrenceStatus {
   PAID
   SKIPPED
   OVERDUE
+}
+
+enum MonthlyPlanEnvelopeType {
+  GROCERIES
+  VARIABLE
 }
 
 enum TelegramConnectionStatus {
@@ -137,8 +143,9 @@ model Category {
   expenses          Expense[]
   budgets           Budget[]
   installmentPlans  InstallmentPlan[]
-  recurringPayments RecurringPayment[]
-  receiptDrafts     ReceiptDraft[]
+  recurringPayments    RecurringPayment[]
+  monthlyPlanEnvelopes MonthlyPlanEnvelope[]
+  receiptDrafts        ReceiptDraft[]
 }
 
 model InstallmentPlan {
@@ -296,6 +303,44 @@ model ReceiptDraft {
   @@index([source])
   @@index([categoryId])
   @@index([expenseId])
+}
+
+model MonthlyFamilyPlan {
+  id                   String                @id @default(cuid())
+  userId               String
+  month                Int
+  year                 Int
+  plannedLiquidIncome  Float                 @default(0)
+  plannedVoucherIncome Float                 @default(0)
+  notes                String?
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  envelopes            MonthlyPlanEnvelope[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@unique([userId, month, year])
+  @@index([userId, year, month])
+}
+
+model MonthlyPlanEnvelope {
+  id            String                  @id @default(cuid())
+  planId        String
+  categoryId    String
+  type          MonthlyPlanEnvelopeType @default(VARIABLE)
+  label         String
+  plannedAmount Float                   @default(0)
+  weeklyAmount  Float                   @default(0)
+  weekCount     Int                     @default(4)
+  sortOrder     Int                     @default(0)
+  notes         String?
+  plan          MonthlyFamilyPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  category      Category                @relation(fields: [categoryId], references: [id])
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  @@unique([planId, categoryId])
+  @@index([planId, sortOrder])
+  @@index([categoryId])
 }
 
 model Budget {

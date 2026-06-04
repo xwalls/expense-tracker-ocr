@@ -65,14 +65,15 @@ export async function DELETE(
 		);
 	}
 
-	const [installmentPlans, recurringPayments, receiptDrafts] =
+	const [installmentPlans, recurringPayments, receiptDrafts, planEnvelopes] =
 		await Promise.all([
 			prisma.installmentPlan.count({ where: { categoryId: id } }),
 			prisma.recurringPayment.count({ where: { categoryId: id } }),
 			prisma.receiptDraft.count({ where: { categoryId: id } }),
+			prisma.monthlyPlanEnvelope.count({ where: { categoryId: id } }),
 		]);
 
-	if (installmentPlans + recurringPayments + receiptDrafts > 0) {
+	if (installmentPlans + recurringPayments + receiptDrafts + planEnvelopes > 0) {
 		return NextResponse.json(
 			{ error: "No se puede eliminar: tiene registros asociados" },
 			{ status: 400 },
