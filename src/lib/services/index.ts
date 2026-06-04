@@ -75,3 +75,6 @@ export {
   findReceiptDuplicateCandidate,
 } from "./receipt-duplicates";
 export type { ReceiptDuplicateCandidate, ReceiptFingerprintInput } from "./receipt-duplicates";
+
+export { getFamilyPlanSummary, updateFamilyPlan, validateFamilyPlanPeriod } from "./family-plan";
+export type { FamilyPlanPeriod, FamilyPlanUpdateInput } from "./family-plan";
