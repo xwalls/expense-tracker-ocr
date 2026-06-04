@@ -3,29 +3,38 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 
 export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+	const session = await getSession();
+	if (!session)
+		return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
-  const users = await prisma.user.findMany({
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      createdAt: true,
-      _count: {
-        select: { expenses: true },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+	const user = await prisma.user.findUnique({
+		where: { id: session.id },
+		select: {
+			id: true,
+			name: true,
+			email: true,
+			role: true,
+			createdAt: true,
+			_count: {
+				select: { expenses: true },
+			},
+		},
+	});
 
-  const result = users.map((u) => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    createdAt: u.createdAt,
-    expenseCount: u._count.expenses,
-  }));
+	if (!user)
+		return NextResponse.json(
+			{ error: "Usuario no encontrado" },
+			{ status: 404 },
+		);
 
-  return NextResponse.json(result);
+	return NextResponse.json([
+		{
+			id: user.id,
+			name: user.name,
+			email: user.email,
+			role: user.role,
+			createdAt: user.createdAt,
+			expenseCount: user._count.expenses,
+		},
+	]);
 }
